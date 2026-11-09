@@ -114,6 +114,11 @@ enum ImageThumbnail {
         else { return false }
         let input = Pipe()
         let output = Pipe()
+        // Close-on-exec: a child another feature spawns meanwhile must not inherit the plaintext.
+        for pipe in [input, output] {
+            _ = fcntl(pipe.fileHandleForReading.fileDescriptor, F_SETFD, FD_CLOEXEC)
+            _ = fcntl(pipe.fileHandleForWriting.fileDescriptor, F_SETFD, FD_CLOEXEC)
+        }
         // A helper that exits mid-write must fail the write, not raise SIGPIPE in the app.
         _ = fcntl(input.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
         process.standardInput = input

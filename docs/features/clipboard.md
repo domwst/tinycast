@@ -186,7 +186,9 @@ helper or a size past 1080px, the original is unsealed and decoded in the app as
 made and deleted on one serial `ImageDerivative.queue`, so a copy's delete waits out the copy in
 flight; the blob itself is still deleted at once. The helper's wait runs on that queue, off the
 cooperative pool, with a 10 s deadline and the caller's cancellation, and its stdin is written apart
-from the stdout read so a full pipe can't deadlock it. `load` sweeps copies whose blob is gone,
+from the stdout read so a full pipe can't deadlock it. Every end of the helper pipes, here and in
+`ClipboardTextWorker`, is close-on-exec, so an unrelated child another feature spawns meanwhile
+(`PseudoTerminal` closes only its own descriptors) never inherits the plaintext. `load` sweeps copies whose blob is gone,
 which a quit before the queue ran can leave. Copies are keyed by the blob's whole file name.
 
 **A backup reads the whole table, not `items`.** `forEachStoredItem(inDatabaseAt:cipher:)` is

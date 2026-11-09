@@ -50,6 +50,11 @@ nonisolated enum ClipboardTextWorker {
         let process = Process()
         let output = Pipe()
         let stdin = input.map { _ in Pipe() }
+        // Close-on-exec: a child another feature spawns meanwhile must not inherit the plaintext.
+        for pipe in [output] + (stdin.map { [$0] } ?? []) {
+            _ = fcntl(pipe.fileHandleForReading.fileDescriptor, F_SETFD, FD_CLOEXEC)
+            _ = fcntl(pipe.fileHandleForWriting.fileDescriptor, F_SETFD, FD_CLOEXEC)
+        }
         // A helper that exits mid-write must fail the write, not raise SIGPIPE in the app.
         if let stdin { _ = fcntl(stdin.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1) }
         process.executableURL = executable
