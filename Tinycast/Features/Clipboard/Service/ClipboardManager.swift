@@ -14,6 +14,9 @@ final class ClipboardManager {
 
     private let store: ClipboardStore
     private let settings: AppSettings
+    private let owners = PasteboardOwnerMonitor()
+    /// `pboard` logs a generation within a millisecond, so a poll that raced it waits one tick.
+    private var heldGeneration: Int?
     private var timer: Timer?
     private var sessionTokens: [NotificationToken] = []
     private var lastChangeCount = 0
@@ -33,6 +36,7 @@ final class ClipboardManager {
     func start() {
         guard !isCapturing else { return }
         isCapturing = true
+        owners.start()
         installSessionObservers()
         startPolling()
     }
@@ -41,6 +45,7 @@ final class ClipboardManager {
         isCapturing = false
         sessionTokens = []
         stopPolling()
+        owners.stop()
     }
 
     // Fast user switching: another session's clipboard isn't ours, so stop waking up for it.
@@ -85,7 +90,7 @@ final class ClipboardManager {
     // Drain first: the real copy must reach history before we overwrite the pasteboard.
     func prepareForTinycastPasteboardMutation() {
         guard isCapturing else { return }
-        poll()
+        poll(waitingForOwner: false)
     }
 
     /// For a ⌘C Tinycast sends itself, whose copy is read and restored but never recorded.
@@ -133,19 +138,26 @@ final class ClipboardManager {
         return !roots.contains { path.hasPrefix($0) }
     }
 
-    private func poll() {
+    private func poll(waitingForOwner: Bool = true) {
         let pb = NSPasteboard.general
-        guard !isCapturePaused, pb.changeCount != lastChangeCount else { return }
-        lastChangeCount = pb.changeCount
+        let generation = pb.changeCount
+        guard !isCapturePaused, generation != lastChangeCount else { return }
+        let writer = owners.owner(ofGeneration: generation)
+        if writer == nil, waitingForOwner, owners.isStreaming, heldGeneration != generation {
+            heldGeneration = generation
+            return
+        }
+        lastChangeCount = generation
 
         if pb.types?.contains(Self.internalType) == true { return }
 
         // Never record secrets: skip copies tagged sensitive by any of the marker owners.
         if let types = pb.types, !Set(types).isDisjoint(with: Self.sensitiveTypes) { return }
 
-        // The pasteboard carries no source, so attribute it to the frontmost app.
-        let sourceBundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-        if let sourceBundleID, settings.clipboardDisabledApps.contains(sourceBundleID) { return }
+        // A menu-bar helper writes while another app is frontmost, so every witness can block.
+        let source = source(writer: writer?.pid)
+        if source.isBlocked(byDisabled: settings.clipboardDisabledApps) { return }
+        let sourceBundleID = source.recordedBundleID
 
         // Ahead of the text branch: Finder puts the file's *name* on `.string` beside its URL.
         if let paths = Self.fileURLs(on: pb) {
@@ -182,6 +194,20 @@ final class ClipboardManager {
             text.count <= ClipboardStore.maxTextLength
         else { return }
         store.addText(text, sourceBundleID: sourceBundleID)
+    }
+
+    private func source(writer: pid_t?) -> ClipboardSource {
+        ClipboardSource(
+            writer: writer.map(Self.appChain) ?? [],
+            typingFocus: TypingFocus.pid().map(Self.appChain) ?? [],
+            frontmost: NSWorkspace.shared.frontmostApplication?.bundleIdentifier)
+    }
+
+    /// Bundle IDs of a process's app and every app around it; empty for a bare tool or service.
+    private static func appChain(of pid: pid_t) -> [String] {
+        guard let path = ProcessExecutable.path(of: pid) else { return [] }
+        return ClipboardSource.enclosingAppBundles(ofExecutable: path)
+            .compactMap { Bundle(path: $0)?.bundleIdentifier }
     }
 
     private static let maxImportedHTMLBytes = 256 * 1024

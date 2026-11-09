@@ -149,6 +149,10 @@ This setting isn't included in [backups](/docs/reference/backup).
 records what you copy from them. You can add your own apps. Copies that apps mark as confidential
 are also skipped.
 
+Excluding an app also covers its menu-bar item and the helpers inside it, even while another app is
+in front. Copying a password from the Passwords menu-bar item isn't recorded. Tinycast asks macOS
+which process wrote each copy, and if that can't be found out, it falls back to the app in front.
+
 ## Limits worth knowing
 
 History is stored in `clipboard.sqlite3`, with images next to it, in Tinycast's Application Support

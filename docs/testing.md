@@ -128,6 +128,7 @@ If a change touches anything in the right column, the harness on the left is man
 | `clipboard-coordinator-test` | Edit Entry selection across query/type changes and pins, failed writes, deletion during editing and cancellation; isolated database and recorded clipboard effects |
 | `clipboard-thumbnail-test` | `Platform/Images/ImageThumbnail.swift` copies against the real store — a remove or clear mid-copy leaves none, same-named JPEG/PNG copies stay apart, a timeout or cancel frees the queue, and a failed or unreadable copy falls back to the original; a stand-in script plays the helper |
 | `pasteboard-test` | `Clipboard/Service/ClipboardManager.swift` capture and `Paster.write` — what a Finder copy reads as, and what a file or image entry writes back |
+| `clipboard-source-test` | `Clipboard/Model/ClipboardSource.swift`, `Platform/PasteboardOwnerMonitor.swift`, `TypingFocus.swift`, `ProcessExecutable.swift` — enclosing-app chains, every witness blocking, the recorded app, the `pboard` line parser, and a live `log stream` naming the harness as writer of its own named pasteboard (skipped where `log stream` is refused) |
 | `emoji-test` | `Emoji/Model/EmojiCatalog.swift`, `EmojiGridGeometry.swift`, the generated data and keyword packs |
 | `emoji-search-test` | `Emoji/Service/EmojiIndex.swift`, `FrequentEmojiStore.swift`, `Scripts/gen-emoji.js`'s keyword format, multilingual search |
 | `command-escape-tap-test` | `Palette/CommandEscapeTap.swift` — dedicated run-loop dispatch while main is blocked, timeout recovery, stale actions, installation cancellation and teardown; private ports and unposted events only |
@@ -524,6 +525,9 @@ caches, TCC grants and login item, so this cannot disturb an installed copy.
   pill says **Clipboard changed, text not copied**
 - A tall phone screenshot and a full-width Retina screenshot copy each line once, whole, in order
 - A copy from an excluded app (Settings ▸ Clipboard ▸ Excluded Applications) is **not** recorded
+- With Finder frontmost, a password copied from the Passwords menu-bar item is **not** recorded, while
+  a `pbcopy` from Terminal is recorded under Terminal and a copy in Safari under Safari
+- `ps` shows one `/usr/bin/log stream` child while history is on, and none once it is switched off
 - Password-manager copies are still not recorded
 - Off (Settings ▸ Clipboard ▸ Enable Clipboard History): nothing new is recorded, the launcher rows
   and their shortcuts are gone, the menu-bar row is gone, and Tab rings straight past the screen

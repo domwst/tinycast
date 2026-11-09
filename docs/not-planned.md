@@ -91,9 +91,6 @@ launchers. We accept that to keep the app simple.
 
 - **Encryption.** History is not encrypted. It never leaves your Mac, and encryption would slow it
   down. **Instead:** add sensitive apps to the block list. ([#993](https://github.com/abue-ammar/tinycast/issues/993))
-- **⚠️ Copies from menu-bar helpers, like the Passwords menu.** The block list covers normal app
-  windows only. Catching menu-bar helpers needs private Apple tools, so **those copies still land in
-  your history.** Delete them by hand if you need to. ([#1407](https://github.com/abue-ammar/tinycast/issues/1407))
 - **A large ⌘Y Quick Look preview.** The preview pane already shows the selected item. ([#1067](https://github.com/abue-ammar/tinycast/issues/1067), [#740](https://github.com/abue-ammar/tinycast/issues/740),
   [#1477](https://github.com/abue-ammar/tinycast/issues/1477))
 - **Open images in Preview.** **Instead:** use Show in Finder. ([#1328](https://github.com/abue-ammar/tinycast/issues/1328))

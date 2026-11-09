@@ -114,9 +114,9 @@ to its entitlement, including resources Tinycast does not use. That grants nothi
 is there so a future feature that adds the usage string but forgets the entitlement fails the release
 instead of shipping a prompt that can never appear.
 
-Nothing else is needed: the only `dlopen` is Apple's own IOBluetooth, so library validation is left
-on, and `node`, `ray` and shell commands are separate processes it never reaches. Bluetooth has no
-hardened-runtime entitlement.
+Nothing else is needed: every `dlopen` names an Apple system framework (SkyLight, IOKit, login,
+IOBluetooth), so library validation is left on, and `node`, `ray`, `/usr/bin/log` and shell commands
+are separate processes it never reaches. Bluetooth has no hardened-runtime entitlement.
 
 `./Scripts/verify-signature.sh <path-to-.app>` asserts all of this — the runtime flag and a
 timestamped Developer ID signature on the app *and* every helper, an intact nested seal, no

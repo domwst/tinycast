@@ -225,8 +225,16 @@ run pasteboard-test        Tinycast/Platform/PasteboardFiles.swift \
                            Tinycast/Features/Clipboard/Model/ColorValue.swift \
                            Tinycast/Features/Clipboard/Model/ColorFormat.swift \
                            Tinycast/Features/Clipboard/Model/ColorSpaces.swift \
+                           Tinycast/Features/Clipboard/Model/ClipboardSource.swift \
                            Tinycast/Features/Clipboard/Service/ClipboardManager.swift \
-                           Tinycast/Features/Clipboard/Service/Paster.swift
+                           Tinycast/Features/Clipboard/Service/Paster.swift \
+                           Tinycast/Platform/PasteboardOwnerMonitor.swift \
+                           Tinycast/Platform/ProcessExecutable.swift \
+                           Tinycast/Platform/TypingFocus.swift
+run clipboard-source-test  Tinycast/Features/Clipboard/Model/ClipboardSource.swift \
+                           Tinycast/Platform/PasteboardOwnerMonitor.swift \
+                           Tinycast/Platform/ProcessExecutable.swift \
+                           Tinycast/Platform/TypingFocus.swift
 run index clipboard-file-performance \
                            Tinycast/Platform/PasteboardFiles.swift \
                            Tinycast/Features/Clipboard/Model/ClipboardStore.swift \

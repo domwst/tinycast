@@ -103,6 +103,31 @@ nothing else can put it back. **Clear history stays live with the feature off** 
 `ClipboardCoordinator.clearHistory()` reopens the file, clears the unpinned rows and closes it again — so a reader
 who turns the feature off can still erase what it kept.
 
+## Source attribution
+
+The pasteboard records no source, so the poller asks three witnesses who wrote a copy, and **any one
+of them being a disabled app drops it**. Each is widened to every `.app` its executable sits inside
+(`ClipboardSource.enclosingAppBundles`), because the app picker only offers indexed apps: blocking
+Passwords has to catch `Passwords.app/Contents/Library/LoginItems/PasswordsMenuBarExtra.app`, which
+copies while Finder or anything else stays frontmost and marks nothing concealed.
+
+1. **The writer.** `PasteboardOwnerMonitor` runs `/usr/bin/log stream --level debug --style ndjson`
+   filtered to `pboard`'s own `Apple CFPasteboard general has new generation N … - pid: P` line. `N`
+   is `NSPasteboard.general.changeCount`, so the writer is matched by generation rather than by time,
+   and the last 64 are kept. The line arrives within a millisecond, so a poll that races it holds the
+   generation for one tick; a drain before Tinycast writes never waits.
+2. **The keyboard-focus owner**, from SkyLight's `SLPSGetTypingFocusProcess` through `dlsym`
+   (`Platform/TypingFocus.swift`). It is a process other than the frontmost only when a panel took the
+   keyboard without activating its app, which is exactly the menu-bar case.
+3. **The frontmost app**, which was the only witness before and still blocks on its own.
+
+History records the writer's outermost app, so an Xcode helper reads as Xcode; a writer in no app
+bundle, such as `pbcopy`, records the frontmost app as before. Every witness fails safe: a macOS
+without the SkyLight symbols, a user `log stream` refuses (it gives up after three quick exits) or a
+changed log line leaves the frontmost app as the only vote. The message text is `pboard`'s debug
+output, not API, so `clipboard-source-test` pins the parser to the observed line and checks the live
+stream against a pasteboard of its own.
+
 ## Store
 
 `ClipboardStore` is SQLite-backed: rows plus a trigram FTS5 index in `clipboard.sqlite3`, with image
