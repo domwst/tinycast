@@ -117,7 +117,7 @@ enum BackupArchive {
         guard !containsSymbolicLink(directory) else { throw ArchiveError.cannotRead }
     }
 
-    /// Hex PBKDF2 of the NFC passphrase: any length fits AEA's 20–256 bytes, and guesses cost more.
+    /// Hex PBKDF2 of the NFC passphrase: any length fits AEA's 20–256 bytes; guesses cost more.
     static func archivePassword(for passphrase: String, salt: [UInt8], rounds: UInt32) -> String {
         let normalized = Array(passphrase.precomposedStringWithCanonicalMapping.utf8)
         let saltBytes = Array("tinycast-backup-passphrase-v1:".utf8) + salt

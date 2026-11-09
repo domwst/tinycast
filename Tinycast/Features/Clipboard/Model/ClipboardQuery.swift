@@ -16,7 +16,7 @@ struct ClipboardQuery: Sendable, Equatable {
 
     var isEmpty: Bool { terms.isEmpty }
 
-    /// Case- and diacritic-insensitive bytes; ASCII is lowered in place, the rest goes to Foundation.
+    /// Case- and diacritic-insensitive bytes; ASCII lowers in place, the rest goes to Foundation.
     static func fold(_ text: String) -> [UInt8] {
         var bytes = Array(text.utf8)
         if bytes.allSatisfy({ $0 < 0x80 }) {

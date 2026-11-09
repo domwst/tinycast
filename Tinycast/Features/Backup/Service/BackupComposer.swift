@@ -116,7 +116,7 @@ enum BackupComposer {
         return (written, missing + unreadable)
     }
 
-    /// nil when the image has gone; a sealed blob leaves as the PNG it holds, a backup's own seal.
+    /// nil when the image is gone or isn't ours; it leaves as its PNG, under the backup's seal.
     private nonisolated static func portableItem(
         _ item: ClipboardItem, unsealingWith cipher: ClipboardCipher, into bundle: BackupBundle
     )
@@ -128,7 +128,7 @@ enum BackupComposer {
                 FileManager.default.fileExists(atPath: path)
             else { return nil }
             let source = URL(fileURLWithPath: path)
-            // The name it was sealed from, so a re-import seals back onto the same blob and dedupes.
+            // The name it was sealed from, so a re-import seals onto the same blob and dedupes.
             var name =
                 source.pathExtension == SealedFile.fileExtension
                 ? source.deletingPathExtension().lastPathComponent : source.lastPathComponent
@@ -139,12 +139,9 @@ enum BackupComposer {
                 name = UUID().uuidString + ".png"
                 destination = bundle.clipboardImagesDirectory.appendingPathComponent(name)
             }
-            if SealedFile.isSealed(source) {
-                guard let image = try? SealedFile.read(source, key: cipher.blobKey) else { return nil }
-                try image.write(to: destination)
-            } else if (try? FileManager.default.linkItem(at: source, to: destination)) == nil {
-                try FileManager.default.copyItem(at: source, to: destination)
-            }
+            // Only a blob this key sealed leaves: a row naming any other file carries nothing out.
+            guard let image = try? SealedFile.read(source, key: cipher.blobKey) else { return nil }
+            try image.write(to: destination)
             imageName = name
         }
         // A referenced file is exported as its path; a backup never carries bytes it never held.

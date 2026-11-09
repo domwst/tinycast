@@ -129,10 +129,10 @@ enum Paster {
             guard let data = store.imageData(for: item) else { return false }
             let entry = NSPasteboardItem()
             entry.setData(data, forType: .png)
-            // A text-only receiver ignores image data but pastes a file URL as its path.
-            ClipboardImageFileProvider.attach(data, to: entry)
             entry.setData(Data(), forType: ClipboardManager.internalType)
-            pb.clearContents()
+            let generation = pb.clearContents()
+            // A text-only receiver ignores image data but pastes a file URL as its path.
+            ClipboardImageFileProvider.attach(data, to: entry, generation: generation)
             guard pb.writeObjects([entry]) else { return false }
             if pb == .general { ClipboardExports.belong(toGeneration: pb.changeCount) }
             return true

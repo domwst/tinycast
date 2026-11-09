@@ -273,7 +273,7 @@ enum ClipboardTextWorker {
 }
 
 enum ClipboardKeyStore {
-    enum Failure: LocalizedError, Sendable { case locked, conversionFailed }
+    enum Failure: LocalizedError, Sendable { case locked, conversionFailed, unreadable }
     enum Unlock: Sendable {
         case ready(ClipboardCipher)
         case unavailable(Failure)

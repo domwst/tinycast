@@ -29,6 +29,7 @@ struct PasteboardTests {
         fileEntriesWriteBackAsFiles()
         aVanishedFileWritesNothing()
         imageEntriesWriteBackAsPNGAndAnExportedFile()
+        aRetiredImageWritesNoExport()
         exportsAreOwnerOnlyAndSwept()
 
         try? FileManager.default.removeItem(at: home)
@@ -394,7 +395,7 @@ struct PasteboardTests {
                 "a second reader is handed the same export")
             expect(SealedFile.isSealed(blob), "while the stored blob stays sealed")
 
-            // AppKit reports the provider finished on handover, so the copy outlives the reads above.
+            // AppKit calls the provider finished on handover, so the copy outlives the reads above.
             pb.clearContents()
             expect(
                 FileManager.default.fileExists(atPath: file.path),
@@ -403,6 +404,28 @@ struct PasteboardTests {
             expect(
                 !FileManager.default.fileExists(atPath: folder.path),
                 "and goes once the clipboard holds something else")
+        }
+    }
+
+    /// Capture stopping retires the image still on the clipboard: nothing would remove a late copy.
+    static func aRetiredImageWritesNoExport() {
+        withScratch { dir in
+            let image = dir.appendingPathComponent("shot.png")
+            try? Data("png bytes of a retired image".utf8).write(to: image)
+            let store = ClipboardStore(directory: dir.appendingPathComponent("store"), cipher: .harness)
+            store.importEntries([ClipboardItem(imagePath: image.path, sourceBundleID: nil)])
+            guard let item = store.items.first else { return fail("the image is sealed into the store") }
+            let exports = ClipboardExports.directory
+            let pb = board()
+            defer { pb.releaseGlobally() }
+            expect(Paster.write(item, store: store, to: pb), "a present image writes")
+            ClipboardExports.discardPasteboardCopies(in: exports)
+            let before = (try? FileManager.default.contentsOfDirectory(atPath: exports.path)) ?? []
+            let file = (pb.readObjects(forClasses: [NSURL.self]) as? [URL])?.first
+            expect(file.map { FileManager.default.fileExists(atPath: $0.path) } != true, "no file is handed out")
+            expect(
+                (try? FileManager.default.contentsOfDirectory(atPath: exports.path)) ?? [] == before,
+                "and nothing is unsealed once the copy was retired")
         }
     }
 

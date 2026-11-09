@@ -103,7 +103,7 @@ struct ClipboardTextTests {
         try await scheduling(in: directory)
         try await retryFailures(in: directory)
         try await sealedImagesAreReadOverStdin(in: directory, helper: await helper.value)
-        // Flushed first: while the helper's stdin can raise SIGPIPE, the last case kills the harness.
+        // Flushed first: while the helper's stdin can raise SIGPIPE, the last case kills the run.
         fflush(stdout)
         await helperThatReadsNothingFailsOnlyTheExtraction(in: directory)
         print("\(passes)/\(passes + failures) passed")

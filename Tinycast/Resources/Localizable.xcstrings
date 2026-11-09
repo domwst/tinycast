@@ -35922,6 +35922,58 @@
         }
       }
     },
+    "Clipboard history couldn't be read from disk, so it stays closed for now." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Zwischenablageverlauf konnte nicht von der Festplatte gelesen werden und bleibt vorerst geschlossen."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No se pudo leer el historial del portapapeles del disco, así que permanece cerrado por ahora."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "L’historique du presse-papiers n’a pas pu être lu sur le disque ; il reste fermé pour le moment."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "クリップボード履歴をディスクから読み込めなかったため、今は閉じたままです。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "디스크에서 클립보드 기록을 읽을 수 없어 당분간 닫힌 상태로 유지됩니다."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Não foi possível ler o histórico da área de transferência do disco, então ele fica fechado por enquanto."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Не удалось прочитать историю буфера обмена с диска, поэтому пока она остаётся закрытой."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法从磁盘读取剪贴板历史记录，因此暂时保持关闭。"
+          }
+        }
+      }
+    },
     "Clipboard history is empty" : {
       "localizations" : {
         "de" : {

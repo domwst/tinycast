@@ -14,16 +14,19 @@ nonisolated enum ClipboardTextWorker {
     static let executable = Bundle.main.bundleURL.appendingPathComponent(
         "Contents/Helpers/ClipboardTextHelper")
 
-    /// `imageKey` unseals a blob the store owns; a referenced file is read where it lies.
+    /// An image row is only ever a sealed blob the store owns; a file row is read where it lies.
     static func extract(_ item: ClipboardItem, imageKey: SymmetricKey?) async throws -> String {
-        guard let path = item.imagePath ?? item.filePath else { return "" }
-        let kind = item.kind == .image ? ClipboardFileKind.image : ClipboardFileKind.of(path: path)
-        guard kind == .image || kind == .pdf else { return "" }
-        let url = URL(fileURLWithPath: path)
-        if item.kind == .image, let imageKey, SealedFile.isSealed(url) {
+        if item.kind == .image {
+            guard let path = item.imagePath, let imageKey else { return "" }
+            let url = URL(fileURLWithPath: path)
+            guard SealedFile.isSealed(url) else { return "" }
             return try await extract(sealedImage: url, key: imageKey, executable: executable)
         }
-        return try await extract(at: url, isPDF: kind == .pdf, executable: executable)
+        guard let path = item.filePath else { return "" }
+        let kind = ClipboardFileKind.of(path: path)
+        guard kind == .image || kind == .pdf else { return "" }
+        return try await extract(
+            at: URL(fileURLWithPath: path), isPDF: kind == .pdf, executable: executable)
     }
 
     static func extract(

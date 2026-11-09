@@ -114,7 +114,8 @@ symlinked note travels as a file. `backup-archive-test` builds both hostile arch
 and asserts nothing escapes.
 
 **Staging lives in `Caches`, not `temporaryDirectory`.** Export unseals each clipboard image into
-it as a PNG and writes the clips' text as JSONL, so for the length of a run the staging tree is
+it as a PNG — only a blob the history's key opens, so a row naming any other file is counted missing
+and carries nothing out — and writes the clips' text as JSONL, so for the length of a run the staging tree is
 plaintext, which is why each run's folder is created 0700; it is the archive that leaves the Mac
 encrypted. Opening a file to import extracts only
 its manifest (`open(…, only:)`), so the pane shows categories and counts without unpacking a

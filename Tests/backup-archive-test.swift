@@ -352,7 +352,7 @@ struct BackupArchiveTest {
         let payload = Data("escaped".utf8)
         for encrypted in [true, false] {
             let label = encrypted ? "encrypted" : "legacy"
-            // Header-by-header: `writeDirectoryContents` refuses to emit the `..` path we need here.
+            // Header-by-header: `writeDirectoryContents` refuses to emit the `..` path needed here.
             let archive = root.appendingPathComponent("evil-\(label).tinycast")
             let built = writeFixture(archive, encrypted: encrypted) { encoder in
                 let header = ArchiveHeader()

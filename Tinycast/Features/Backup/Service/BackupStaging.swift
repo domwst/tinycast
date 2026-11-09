@@ -6,7 +6,7 @@ struct BackupStaging: Sendable {
 
     init(base: URL = AppPaths.caches()) throws {
         let container = Self.container(in: base)
-        // A link planted in place of the folder would put plaintext, and sweeps, wherever it points.
+        // A link planted for the folder would put plaintext, and sweeps, wherever it points.
         if (try? FileManager.default.attributesOfItem(atPath: container.path))?[.type]
             as? FileAttributeType == .typeSymbolicLink
         {

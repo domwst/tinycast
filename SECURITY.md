@@ -19,7 +19,8 @@ Of particular interest:
 
 - **Accessibility (TCC)** — anything that widens what the paste grant enables.
 - **Clipboard history** — sealed on disk with a Keychain key; any path that writes it in plaintext,
-  exposes the key, or records a copy an excluded app or a concealed marker should have kept out.
+  exposes the key, reads a file a history row merely names, or records a copy an excluded app or a
+  concealed marker should have kept out.
 - **Network** — Tinycast is offline by default and every networked feature is consent-gated. A path
   that reaches the network without consent, or survives consent being withdrawn, is high severity.
 - **Hotkeys** — the in-house hotkey stack and the Input Monitoring grant.

@@ -303,7 +303,7 @@ final class ClipboardStore {
         try? FileManager.default.createDirectory(at: imagesDir, withIntermediateDirectories: true)
     }
 
-    /// A harness's key, which is never the Keychain's; the app always opens through the coordinator.
+    /// A harness's key, never the Keychain's; the app always opens through the coordinator.
     convenience init(directory: URL?, cipher: ClipboardCipher) {
         self.init(directory: directory)
         open(cipher: cipher)
@@ -311,11 +311,60 @@ final class ClipboardStore {
 
     var isOpen: Bool { db != nil }
 
+    /// What a store file is, judged without its key; one that won't open right now is unreadable.
+    enum FileState: Sendable, Equatable {
+        case absent
+        /// Open or read failed for a reason that may pass: never a licence to delete or re-key.
+        case unreadable
+        case legacy
+        case sealed
+        /// Corrupt, or another `user_version`: captured history nothing here can read.
+        case discardable
+    }
+
+    nonisolated static func inspect(_ database: URL) -> FileState {
+        guard FileManager.default.fileExists(atPath: database.path) else { return .absent }
+        var db: OpaquePointer?
+        defer { sqlite3_close_v2(db) }
+        guard sqlite3_open_v2(database.path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK else {
+            return .unreadable
+        }
+        sqlite3_busy_timeout(db, 2_000)
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+        let prepared = sqlite3_prepare_v2(
+            db, "SELECT (SELECT user_version FROM pragma_user_version), "
+                + "(SELECT COUNT(*) FROM sqlite_master WHERE name = 'items')", -1, &stmt, nil)
+        guard prepared == SQLITE_OK, sqlite3_step(stmt) == SQLITE_ROW else {
+            let corrupt = isCorruption(prepared) || isCorruption(sqlite3_errcode(db))
+            return corrupt ? .discardable : .unreadable
+        }
+        let version = sqlite3_column_int64(stmt, 0)
+        let hasItems = sqlite3_column_int64(stmt, 1) > 0
+        switch (version, hasItems) {
+        case (Int64(schemaVersion), _): return .sealed
+        case (0, true): return .legacy
+        case (0, false): return .absent
+        default: return .discardable
+        }
+    }
+
+    nonisolated private static func isCorruption(_ code: Int32) -> Bool {
+        code == SQLITE_NOTADB || code == SQLITE_CORRUPT
+    }
+
     /// Idempotent, so the coordinator can re-open the file when the feature is switched back on.
     func open(cipher: ClipboardCipher) {
         guard db == nil else { return }
         self.cipher = cipher
-        if openDatabase() { return }
+        switch openDatabase() {
+        case .opened: return
+        case .failed:
+            // It may open next time, and only a file that opened and was refused is ever deleted.
+            closeDatabase()
+            return
+        case .refused: break
+        }
         // Captured, not authored: discard a corrupt, outdated or foreign-keyed database.
         closeDatabase()
         Self.removeDatabase(at: dbURL)
@@ -325,7 +374,7 @@ final class ClipboardStore {
                 try? FileManager.default.removeItem(at: imagesDir.appendingPathComponent(name))
             }
         }
-        if !openDatabase() { closeDatabase() }
+        if openDatabase() != .opened { closeDatabase() }
     }
 
     /// Every accessor is statement-guarded, so a closed store answers as an empty history.
@@ -624,11 +673,11 @@ final class ClipboardStore {
         return URL(filePath: path, directoryHint: .inferFromPath)
     }
 
-    /// The image's bytes, unsealed when it is ours; nil once the blob is gone or won't open.
+    /// The image's bytes; nil once the blob is gone or won't open, and for any path not ours.
     func imageData(for item: ClipboardItem) -> Data? {
-        guard let url = imageURL(for: item) else { return nil }
-        guard ownsImage(of: item) else { return try? Data(contentsOf: url, options: .mappedIfSafe) }
-        guard let key = cipher?.blobKey else { return nil }
+        guard let url = imageURL(for: item), ownsImage(of: item), let key = cipher?.blobKey else {
+            return nil
+        }
         return try? SealedFile.read(url, key: key)
     }
 
@@ -740,7 +789,7 @@ final class ClipboardStore {
         }
     }
 
-    /// Scans run only while the palette shows, so a hidden history never decrypts in the background.
+    /// Scans run only while the palette shows, so a hidden history never decrypts unseen.
     func setSearchActive(_ active: Bool) {
         guard searchActive != active else { return }
         searchActive = active
@@ -798,7 +847,7 @@ final class ClipboardStore {
         let url: URL
         let query: String
         let filter: ClipboardFilter
-        /// Unpinned rows main holds, whose own text it already matched; never inferred from a rowid.
+        /// Unpinned rows main holds, whose text it already matched; never inferred from a rowid.
         let resident: Set<UUID>
         /// A lower bound on every resident rowid, so a short query reads no further down.
         let floor: Int64
@@ -1119,14 +1168,21 @@ final class ClipboardStore {
         }
     }
 
-    private func openDatabase() -> Bool {
+    private enum OpenOutcome { case opened, refused, failed }
+
+    private func openDatabase() -> OpenOutcome {
         guard let cipher,
             sqlite3_open_v2(dbURL.path, &db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nil)
-                == SQLITE_OK,
-            sqlite3_exec(db, "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;", nil, nil, nil)
-                == SQLITE_OK,
-            Self.prepareSchema(db, cipher: cipher)
-        else { return false }
+                == SQLITE_OK
+        else { return .failed }
+        let pragmas = sqlite3_exec(
+            db, "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;", nil, nil, nil)
+        guard pragmas == SQLITE_OK else { return Self.isCorruption(pragmas) ? .refused : .failed }
+        switch Self.prepareSchema(db, cipher: cipher) {
+        case true?: break
+        case false?: return .refused
+        case nil: return .failed
+        }
         // An import holds the write lock a chunk at a time; a delete must wait it out, not drop.
         sqlite3_busy_timeout(db, 2_000)
         insertStmt = prepare(Self.insertSQL)
@@ -1150,27 +1206,48 @@ final class ClipboardStore {
             WHERE created_at < ? AND pinned_at IS NULL AND image_path IS NOT NULL
             """)
         deleteStaleStmt = prepare("DELETE FROM items WHERE created_at < ? AND pinned_at IS NULL")
-        return insertStmt != nil && loadStmt != nil && windowFloorStmt != nil
+        let prepared =
+            insertStmt != nil && loadStmt != nil && windowFloorStmt != nil
             && deleteByIDStmt != nil && pinStmt != nil && staleImagesStmt != nil
             && deleteStaleStmt != nil
+        return prepared ? .opened : .failed
     }
 
-    /// Whether `database` is a sealed store this cipher opens, judged by its canary alone.
-    nonisolated static func opensSealedStore(at database: URL, cipher: ClipboardCipher) -> Bool {
-        guard FileManager.default.fileExists(atPath: database.path) else { return false }
+    /// Whether a sealed store's canary opens under `cipher`; nil when it couldn't be read just now.
+    nonisolated static func canaryOpens(at database: URL, cipher: ClipboardCipher) -> Bool? {
         var db: OpaquePointer?
         defer { sqlite3_close_v2(db) }
-        guard sqlite3_open_v2(database.path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK,
-            intValue(db, "PRAGMA user_version") == Int64(schemaVersion),
-            let canary = meta(db, key: "canary")
-        else { return false }
-        return cipher.open(canary, field: .canary, row: canaryRow) == canaryValue
+        guard sqlite3_open_v2(database.path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK else {
+            return nil
+        }
+        sqlite3_busy_timeout(db, 2_000)
+        guard intValue(db, "PRAGMA user_version") == Int64(schemaVersion) else { return nil }
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+        guard sqlite3_prepare_v2(db, "SELECT value FROM meta WHERE key = 'canary'", -1, &stmt, nil)
+            == SQLITE_OK
+        else {
+            // No meta table at all is a store no key can vouch for; anything else may pass.
+            return sqlite3_errcode(db) == SQLITE_ERROR ? false : nil
+        }
+        switch sqlite3_step(stmt) {
+        case SQLITE_ROW:
+            guard let canary = columnData(stmt, 0) else { return false }
+            return cipher.open(canary, field: .canary, row: canaryRow) == canaryValue
+        case SQLITE_DONE: return false
+        default: return nil
+        }
     }
 
-    /// A new file gets the schema and a canary; an existing one must be this version and this key.
-    nonisolated static func prepareSchema(_ db: OpaquePointer?, cipher: ClipboardCipher) -> Bool {
+    nonisolated static func opensSealedStore(at database: URL, cipher: ClipboardCipher) -> Bool {
+        canaryOpens(at: database, cipher: cipher) == true
+    }
+
+    /// nil means a read failed, which is never grounds to discard what may be a good store.
+    nonisolated static func prepareSchema(_ db: OpaquePointer?, cipher: ClipboardCipher) -> Bool? {
         let version = intValue(db, "PRAGMA user_version")
         let tables = intValue(db, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'")
+        guard version >= 0, tables >= 0 else { return nil }
         if version == 0, tables == 0 {
             guard let canary = cipher.seal(canaryValue, field: .canary, row: canaryRow),
                 sqlite3_exec(db, "BEGIN IMMEDIATE", nil, nil, nil) == SQLITE_OK
@@ -1277,6 +1354,8 @@ final class ClipboardStore {
                 pending = 0
             }
             pending += 1
+            // A file someone sends is held to what a capture would have recorded.
+            if staged.kind == .text, (staged.text?.count ?? 0) > maxTextLength { continue }
             let item = adoptionTarget(staged, in: imagesDirectory)
             guard keys.insert(importKey(item)).inserted else { continue }
             if item.imagePath != staged.imagePath,
@@ -1329,7 +1408,7 @@ final class ClipboardStore {
         return (try? SealedFile.write(data, to: URL(fileURLWithPath: destination), key: key)) != nil
     }
 
-    /// Past the memory window, off-main; answers how many rows wouldn't open, for a backup to report.
+    /// Past the memory window, off-main; counts rows that wouldn't open, for a backup to report.
     @discardableResult
     nonisolated static func forEachStoredItem(
         inDatabaseAt url: URL, cipher: ClipboardCipher, _ body: (ClipboardItem) -> Void

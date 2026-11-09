@@ -20,7 +20,7 @@ struct ClipboardThumbnailTests {
         await fallbackReadsTheOriginalUnlessCancelled()
         await failedCopyFallsBackToTheOriginal()
         await unreadableCopyFallsBackAndIsDropped()
-        // Flushed first: while the helper's stdin can raise SIGPIPE, the last case kills the harness.
+        // Flushed first: while the helper's stdin can raise SIGPIPE, the last case kills the run.
         fflush(stdout)
         await helperThatReadsNothingFailsOnlyTheCopy()
 

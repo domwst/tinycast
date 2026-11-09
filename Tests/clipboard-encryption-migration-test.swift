@@ -1,10 +1,12 @@
 import CryptoKit
 import Foundation
+import ImageIO
 import SQLite3
+import UniformTypeIdentifiers
 
 private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
-/// Compiles the shipped migration against the real store: a plaintext history goes in, none comes out.
+/// The shipped migration against the real store: plaintext history goes in, none comes out.
 @main
 @MainActor
 struct ClipboardEncryptionMigrationTest {
@@ -38,6 +40,8 @@ struct ClipboardEncryptionMigrationTest {
         onlyTheRightKeyOpensTheStore()
         imagesStayBoundToTheirRows()
         importedPathsAreNeverOwned()
+        foreignPathsAreDropped()
+        anUnreadableStoreIsKept()
 
         print(failures == 0 ? "\nALL PASSED" : "\n\(failures) FAILED")
         exit(failures == 0 ? 0 : 1)
@@ -52,6 +56,8 @@ struct ClipboardEncryptionMigrationTest {
         let marker: String
         let imageMarker: Data
         let external: URL
+        let externalBytes: Data
+        let home: URL
     }
 
     /// The v1 layout: plain text columns, trigram FTS, loose PNGs and plaintext thumbnails.
@@ -65,10 +71,14 @@ struct ClipboardEncryptionMigrationTest {
         let thumbnails = images.appendingPathComponent(".thumbnails")
         try? FileManager.default.createDirectory(at: thumbnails, withIntermediateDirectories: true)
         try? imageMarker.write(to: thumbnails.appendingPathComponent(owned.lastPathComponent + "-256.png"))
-        let external = root.appendingPathComponent("raycast/file-abc.png")
+        let home = root.appendingPathComponent("home", isDirectory: true)
+        let external = home.appendingPathComponent(
+            "Library/Application Support/com.raycast.macos/file-abc.png")
         try? FileManager.default.createDirectory(
             at: external.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try? imageMarker.write(to: external)
+        // Decodable, as the import policy demands, with the marker riding after the image's end.
+        let externalBytes = onePixelPNG() + imageMarker
+        try? externalBytes.write(to: external)
 
         var db: OpaquePointer?
         sqlite3_open_v2(database.path, &db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nil)
@@ -127,7 +137,23 @@ struct ClipboardEncryptionMigrationTest {
             nil, nil, nil)
         return Legacy(
             root: root, database: database, images: images, marker: marker, imageMarker: imageMarker,
-            external: external)
+            external: external, externalBytes: externalBytes, home: home)
+    }
+
+    static func onePixelPNG() -> Data {
+        let data = NSMutableData()
+        guard
+            let context = CGContext(
+                data: nil, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
+            let image = context.makeImage(),
+            let destination = CGImageDestinationCreateWithData(
+                data, UTType.png.identifier as CFString, 1, nil)
+        else { return Data() }
+        CGImageDestinationAddImage(destination, image, nil)
+        CGImageDestinationFinalize(destination)
+        return data as Data
     }
 
     static func bind(_ value: String?, _ stmt: OpaquePointer?, _ index: Int32) {
@@ -138,11 +164,15 @@ struct ClipboardEncryptionMigrationTest {
 
     /// Every byte the store keeps on disk, thumbnails and journals included.
     static func leaks(_ needle: Data, in root: URL, excluding excluded: URL? = nil) -> [String] {
-        guard let walker = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil)
+        guard let walker = FileManager.default.enumerator(
+            at: root, includingPropertiesForKeys: [.isSymbolicLinkKey])
         else { return [] }
         var found: [String] = []
         for case let url as URL in walker where url.path != excluded?.path {
-            guard let data = try? Data(contentsOf: url), data.range(of: needle) != nil else { continue }
+            // A link's bytes are its target's, which a store never wrote.
+            guard (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true,
+                let data = try? Data(contentsOf: url), data.range(of: needle) != nil
+            else { continue }
             found.append(url.lastPathComponent)
         }
         return found
@@ -154,10 +184,10 @@ struct ClipboardEncryptionMigrationTest {
         let root = scratch()
         defer { try? FileManager.default.removeItem(at: root) }
         let fixture = legacy(in: root)
-        ClipboardEncryptionMigration.run(database: fixture.database, images: fixture.images, cipher: cipher)
+        ClipboardEncryptionMigration.run(
+            database: fixture.database, images: fixture.images, cipher: cipher, home: fixture.home)
 
         check("the converted file is the sealed version", ClipboardEncryptionMigration.isSealedStore(fixture.database))
-        let rayRoot = root.appendingPathComponent("raycast")
         check(
             "no clip text survives anywhere in the store",
             leaks(Data(fixture.marker.utf8), in: root, excluding: nil).isEmpty)
@@ -166,8 +196,7 @@ struct ClipboardEncryptionMigrationTest {
             leaks(fixture.imageMarker, in: fixture.images).isEmpty)
         check(
             "the other app's original file is left alone",
-            (try? Data(contentsOf: fixture.external)) == fixture.imageMarker
-                && FileManager.default.fileExists(atPath: rayRoot.path))
+            (try? Data(contentsOf: fixture.external)) == fixture.externalBytes)
         let thumbnails = fixture.images.appendingPathComponent(".thumbnails")
         check(
             "the plaintext thumbnails are gone",
@@ -175,7 +204,7 @@ struct ClipboardEncryptionMigrationTest {
 
         let store = ClipboardStore(directory: root, cipher: cipher)
         store.load()
-        check("every row survives, in order", store.items.count == 6)
+        check("every row survives but the vanished image's", store.items.count == 5)
         check(
             "text survives",
             store.items.compactMap(\.text).contains("newest \(fixture.marker)")
@@ -193,10 +222,11 @@ struct ClipboardEncryptionMigrationTest {
         check("an owned and an imported image both become sealed blobs", sealed.count == 2)
         check(
             "each sealed blob opens to the original bytes",
-            sealed.allSatisfy { store.imageData(for: $0) == fixture.imageMarker })
+            Set(sealed.compactMap { store.imageData(for: $0) })
+                == [fixture.imageMarker, fixture.externalBytes])
         check(
-            "a reference to a vanished file stays as it was",
-            images.contains { $0.imagePath == "/nonexistent/gone.png" })
+            "a reference to a vanished image goes, since nothing is left to seal",
+            !images.contains { $0.imagePath == "/nonexistent/gone.png" })
 
         check("recognized text survives, sealed", store.setTextSearchEnabled(true))
         _ = store.search("ocr \(fixture.marker)", filter: .all)
@@ -206,10 +236,11 @@ struct ClipboardEncryptionMigrationTest {
             store.search("ocr \(fixture.marker)", filter: .all).contains { $0.kind == .image })
         store.close()
 
-        ClipboardEncryptionMigration.run(database: fixture.database, images: fixture.images, cipher: cipher)
+        ClipboardEncryptionMigration.run(
+            database: fixture.database, images: fixture.images, cipher: cipher, home: fixture.home)
         let again = ClipboardStore(directory: root, cipher: cipher)
         again.load()
-        check("running it again changes nothing", again.items.count == 6)
+        check("running it again changes nothing", again.items.count == 5)
     }
 
     static func resumesAfterACrash() async {
@@ -218,27 +249,30 @@ struct ClipboardEncryptionMigrationTest {
         let fixture = legacy(in: root)
         let converting = URL(fileURLWithPath: fixture.database.path + ".converting")
         try? Data("half a file".utf8).write(to: converting)
-        ClipboardEncryptionMigration.run(database: fixture.database, images: fixture.images, cipher: cipher)
+        ClipboardEncryptionMigration.run(
+            database: fixture.database, images: fixture.images, cipher: cipher, home: fixture.home)
         let rebuilt = ClipboardStore(directory: root, cipher: cipher)
         rebuilt.load()
-        check("a stale half-made conversion is rebuilt from the original", rebuilt.items.count == 6)
+        check("a stale half-made conversion is rebuilt from the original", rebuilt.items.count == 5)
         rebuilt.close()
 
         // Stopped between removing the old file and the swap: the finished copy must be adopted.
         let second = scratch()
         defer { try? FileManager.default.removeItem(at: second) }
         let other = legacy(in: second)
-        ClipboardEncryptionMigration.run(database: other.database, images: other.images, cipher: cipher)
+        ClipboardEncryptionMigration.run(
+            database: other.database, images: other.images, cipher: cipher, home: other.home)
         let finished = URL(fileURLWithPath: other.database.path + ".converting")
         try? FileManager.default.moveItem(at: other.database, to: finished)
-        ClipboardEncryptionMigration.run(database: other.database, images: other.images, cipher: cipher)
+        ClipboardEncryptionMigration.run(
+            database: other.database, images: other.images, cipher: cipher, home: other.home)
         check(
             "a finished conversion left beside a missing original is swapped in",
             ClipboardEncryptionMigration.isSealedStore(other.database)
                 && !FileManager.default.fileExists(atPath: finished.path))
         let resumed = ClipboardStore(directory: second, cipher: cipher)
         resumed.load()
-        check("and keeps every row", resumed.items.count == 6)
+        check("and keeps every row", resumed.items.count == 5)
     }
 
     static func leavesASealedStoreAlone() {
@@ -272,7 +306,8 @@ struct ClipboardEncryptionMigrationTest {
         // A folder where the sealed copy would go makes its rename fail.
         let blocker = fixture.images.appendingPathComponent(ClipboardStore.sealedName(forOriginal: owned))
         try? FileManager.default.createDirectory(at: blocker, withIntermediateDirectories: true)
-        ClipboardEncryptionMigration.run(database: fixture.database, images: fixture.images, cipher: cipher)
+        ClipboardEncryptionMigration.run(
+            database: fixture.database, images: fixture.images, cipher: cipher, home: fixture.home)
         check(
             "a failed seal leaves the old file unconverted",
             !ClipboardEncryptionMigration.isSealedStore(fixture.database))
@@ -289,7 +324,8 @@ struct ClipboardEncryptionMigrationTest {
         let root = scratch()
         defer { try? FileManager.default.removeItem(at: root) }
         let fixture = legacy(in: root)
-        ClipboardEncryptionMigration.run(database: fixture.database, images: fixture.images, cipher: cipher)
+        ClipboardEncryptionMigration.run(
+            database: fixture.database, images: fixture.images, cipher: cipher, home: fixture.home)
         let stray = fixture.images.appendingPathComponent("\(UUID().uuidString).png")
         try? fixture.imageMarker.write(to: stray)
         let thumbnail = fixture.images.appendingPathComponent(".thumbnails/stray.png-256.png")
@@ -297,7 +333,8 @@ struct ClipboardEncryptionMigrationTest {
         check(
             "leftover plaintext keeps the migration pending",
             ClipboardEncryptionMigration.isPending(database: fixture.database, images: fixture.images))
-        ClipboardEncryptionMigration.run(database: fixture.database, images: fixture.images, cipher: cipher)
+        ClipboardEncryptionMigration.run(
+            database: fixture.database, images: fixture.images, cipher: cipher, home: fixture.home)
         check(
             "and the next run removes it, blob and thumbnail",
             leaks(fixture.imageMarker, in: fixture.images).isEmpty)
@@ -331,7 +368,8 @@ struct ClipboardEncryptionMigrationTest {
         let root = scratch()
         defer { try? FileManager.default.removeItem(at: root) }
         let fixture = legacy(in: root)
-        ClipboardEncryptionMigration.run(database: fixture.database, images: fixture.images, cipher: cipher)
+        ClipboardEncryptionMigration.run(
+            database: fixture.database, images: fixture.images, cipher: cipher, home: fixture.home)
         var db: OpaquePointer?
         sqlite3_open_v2(fixture.database.path, &db, SQLITE_OPEN_READWRITE, nil)
         sqlite3_exec(
@@ -346,7 +384,7 @@ struct ClipboardEncryptionMigrationTest {
         store.load()
         check(
             "a row pointed at another row's image no longer opens",
-            store.items.filter { $0.kind == .image }.count == 2)
+            store.items.filter { $0.kind == .image }.count == 1)
     }
 
     /// `images/../victim` is not ours: an import copies it and no prune or delete ever touches it.
@@ -373,6 +411,58 @@ struct ClipboardEncryptionMigrationTest {
         check(
             "an imported path outside the store survives import, prune, delete and clear",
             FileManager.default.fileExists(atPath: victim.appendingPathComponent("precious.txt").path))
+    }
+
+    /// A row may name any file: only an image of ours, or one past the Raycast policy, is read.
+    static func foreignPathsAreDropped() {
+        let root = scratch()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fixture = legacy(in: root)
+        let secretMarker = Data("SECRET-\(UUID().uuidString)".utf8)
+        let secret = root.appendingPathComponent("secret.txt")
+        try? secretMarker.write(to: secret)
+        let folder = root.appendingPathComponent("folder", isDirectory: true)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let link = fixture.images.appendingPathComponent("\(UUID().uuidString).png")
+        try? FileManager.default.createSymbolicLink(at: link, withDestinationURL: secret)
+        let paths = [secret.path, folder.path, fixture.images.path + "/../secret.txt", link.path]
+        var db: OpaquePointer?
+        sqlite3_open_v2(fixture.database.path, &db, SQLITE_OPEN_READWRITE, nil)
+        let now = Date().timeIntervalSince1970
+        for path in paths {
+            sqlite3_exec(
+                db,
+                """
+                INSERT INTO items(id, kind, image_path, created_at)
+                VALUES('\(UUID().uuidString)', 'image', '\(path)', \(now))
+                """, nil, nil, nil)
+        }
+        sqlite3_close_v2(db)
+        let converted = ClipboardEncryptionMigration.run(
+            database: fixture.database, images: fixture.images, cipher: cipher, home: fixture.home)
+        check("a row naming a foreign file never stops the conversion", converted)
+        let store = ClipboardStore(directory: root, cipher: cipher)
+        store.load()
+        check("every such row is dropped", store.items.count == 5)
+        check("no foreign file's bytes are sealed into the store", leaks(secretMarker, in: fixture.images).isEmpty)
+        check("and the file itself is left alone", (try? Data(contentsOf: secret)) == secretMarker)
+    }
+
+    /// A store that won't open just now may be the only history: it is neither judged nor replaced.
+    static func anUnreadableStoreIsKept() {
+        let root = scratch()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fixture = legacy(in: root)
+        chmod(fixture.database.path, 0)
+        check("an unopenable file reads as unreadable", ClipboardStore.inspect(fixture.database) == .unreadable)
+        let converted = ClipboardEncryptionMigration.run(
+            database: fixture.database, images: fixture.images, cipher: cipher, home: fixture.home)
+        check("the run reports it couldn't finish", !converted)
+        chmod(fixture.database.path, 0o600)
+        check("and the plaintext history is still there to convert", ClipboardStore.inspect(fixture.database) == .legacy)
+        let retried = ClipboardEncryptionMigration.run(
+            database: fixture.database, images: fixture.images, cipher: cipher, home: fixture.home)
+        check("which the next run does", retried && ClipboardEncryptionMigration.isSealedStore(fixture.database))
     }
 
     /// A user who never ran the release opens the old file directly: history goes, plaintext too.

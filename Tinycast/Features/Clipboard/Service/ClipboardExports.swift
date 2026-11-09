@@ -11,16 +11,27 @@ nonisolated enum ClipboardExports {
         AppPaths.caches().appendingPathComponent("clipboard-exports", isDirectory: true)
     }
 
-    /// Whether a copy exists, and the pasteboard generation it was made for.
-    private static let state = Mutex<(exported: Bool, generation: Int?)>((false, nil))
-    /// AppKit fulfils every outstanding promise as the app quits; that must not leave a copy behind.
-    private static let declining = Mutex(false)
+    private struct State {
+        var exported = false
+        /// The general pasteboard's generation the copies were made for.
+        var generation: Int?
+        /// Bumped by every discard, so a provider attached before it never writes again.
+        var epoch = 0
+        /// AppKit fulfils every outstanding promise as the app quits; none may leave a copy behind.
+        var declining = false
+    }
 
-    static var isDeclining: Bool { declining.withLock { $0 } }
+    private static let state = Mutex(State())
+
+    static var epoch: Int { state.withLock { $0.epoch } }
+
+    static func admits(epoch: Int) -> Bool {
+        state.withLock { !$0.declining && $0.epoch == epoch }
+    }
 
     /// Called once the quit is committed, so no reader is left to have asked for a file.
     static func declineCopiesForTermination() {
-        declining.withLock { $0 = true }
+        state.withLock { $0.declining = true }
         discardPasteboardCopies()
     }
 
@@ -53,9 +64,12 @@ nonisolated enum ClipboardExports {
     /// Once the clipboard holds anything else, by anyone's write, no paste can need a copy.
     static func discardPasteboardCopies(in root: URL = directory, unlessGeneration current: Int? = nil) {
         let discard = state.withLock { state -> Bool in
-            guard state.exported, current == nil || current != state.generation else { return false }
-            state = (false, nil)
-            return true
+            guard current == nil || current != state.generation else { return false }
+            let exported = state.exported
+            state.exported = false
+            state.generation = nil
+            state.epoch &+= 1
+            return exported
         }
         if discard { try? FileManager.default.removeItem(at: root) }
     }
@@ -74,26 +88,36 @@ nonisolated enum ClipboardExports {
 final class ClipboardImageFileProvider: NSObject, NSPasteboardItemDataProvider, Sendable {
     private let data: Data
     private let root: URL
+    private let generation: Int
+    private let epoch: Int
     private let exported = Mutex<URL?>(nil)
     /// The pasteboard holds providers weakly, so each stays here until it reports itself finished.
     private static let live = Mutex<[ObjectIdentifier: ClipboardImageFileProvider]>([:])
 
-    private init(data: Data, root: URL) {
+    private init(data: Data, root: URL, generation: Int) {
         self.data = data
         self.root = root
+        self.generation = generation
+        epoch = ClipboardExports.epoch
     }
 
-    static func attach(_ data: Data, to item: NSPasteboardItem, root: URL = ClipboardExports.directory) {
-        let provider = ClipboardImageFileProvider(data: data, root: root)
+    /// `generation` is what `clearContents()` returned for the write this item belongs to.
+    static func attach(
+        _ data: Data, to item: NSPasteboardItem, generation: Int, root: URL = ClipboardExports.directory
+    ) {
+        let provider = ClipboardImageFileProvider(data: data, root: root, generation: generation)
         live.withLock { $0[ObjectIdentifier(provider)] = provider }
         item.setDataProvider(provider, forTypes: [.fileURL])
     }
 
+    /// Only while its own write is still on the pasteboard and no discard has retired it since.
     func pasteboard(
         _ pasteboard: NSPasteboard?, item: NSPasteboardItem,
         provideDataForType type: NSPasteboard.PasteboardType
     ) {
-        guard type == .fileURL, !ClipboardExports.isDeclining else { return }
+        guard type == .fileURL, pasteboard?.changeCount == generation,
+            ClipboardExports.admits(epoch: epoch)
+        else { return }
         let url = exported.withLock { url -> URL? in
             if url.map({ FileManager.default.fileExists(atPath: $0.path) }) != true {
                 url = try? ClipboardExports.write(data, in: root)

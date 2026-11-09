@@ -248,6 +248,7 @@ run clipboard-cipher-test  Tinycast/Platform/SealedFile.swift \
 run clipboard-encryption-migration-test \
                            Tinycast/Migrations/ClipboardEncryptionMigration.swift \
                            Tinycast/Features/Clipboard/Model/*.swift \
+                           Tinycast/Features/Backup/Service/RaycastImagePolicy.swift \
                            Tinycast/Platform/Images/ImageDerivative.swift \
                            Tinycast/Platform/SealedFile.swift $Q
 run clipboard-source-test  Tinycast/Features/Clipboard/Model/ClipboardSource.swift \

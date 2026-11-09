@@ -55,6 +55,15 @@ struct KeychainSecretStore: Sendable {
         }
     }
 
+    /// Add-only: an item already there, perhaps planted, is refused rather than overwritten.
+    func addSecret(_ secret: String, for account: UUID) throws {
+        guard let data = secret.data(using: .utf8) else { throw StoreError.invalidEncoding }
+        var addition = query(for: account, returningData: false)
+        addition[kSecValueData as String] = data
+        let status = SecItemAdd(addition as CFDictionary, nil)
+        guard status == errSecSuccess else { throw StoreError.keychain(status) }
+    }
+
     func removeSecret(for account: UUID) throws {
         let status = SecItemDelete(query(for: account, returningData: false) as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else {

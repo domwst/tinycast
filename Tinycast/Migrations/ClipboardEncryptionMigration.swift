@@ -7,25 +7,29 @@ private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.sel
 nonisolated enum ClipboardEncryptionMigration {
     /// Idempotent; false only when a plaintext history is still there because converting it failed.
     @discardableResult
-    static func run(database: URL, images: URL, cipher: ClipboardCipher) -> Bool {
+    static func run(
+        database: URL, images: URL, cipher: ClipboardCipher,
+        home: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) -> Bool {
         let converting = URL(fileURLWithPath: database.path + ".converting")
-        guard FileManager.default.fileExists(atPath: database.path) else {
-            // Stopped between removing the old file and the swap: the new one is already complete.
-            if isSealedStore(converting) {
-                if rename(converting.path, database.path) == 0 { removePlaintext(in: images) }
-            } else {
-                ClipboardStore.removeDatabase(at: converting)
-            }
+        recoverInterruptedSwap(database: database, images: images)
+        switch ClipboardStore.inspect(database) {
+        case .unreadable:
+            // A file that won't open right now may still be the history: try again next launch.
+            return false
+        case .absent, .discardable:
+            ClipboardStore.removeDatabase(at: converting)
             return true
-        }
-        guard userVersion(database) == 0, hasItems(database) else {
+        case .sealed:
             ClipboardStore.removeDatabase(at: converting)
             // Stopped after the swap but before the old images went: finish that now.
-            if isSealedStore(database) { removePlaintext(in: images) }
+            removePlaintext(in: images)
             return true
+        case .legacy:
+            break
         }
         ClipboardStore.removeDatabase(at: converting)
-        guard convert(database, into: converting, images: images, cipher: cipher) else {
+        guard convert(database, into: converting, images: images, cipher: cipher, home: home) else {
             ClipboardStore.removeDatabase(at: converting)
             return false
         }
@@ -36,22 +40,33 @@ nonisolated enum ClipboardEncryptionMigration {
         return true
     }
 
+    /// Finishes a swap a crash interrupted, before anything decides the key it alone can vouch for.
+    static func recoverInterruptedSwap(database: URL, images: URL) {
+        let converting = URL(fileURLWithPath: database.path + ".converting")
+        guard !FileManager.default.fileExists(atPath: database.path),
+            FileManager.default.fileExists(atPath: converting.path)
+        else { return }
+        if ClipboardStore.inspect(converting) == .sealed {
+            if rename(converting.path, database.path) == 0 { removePlaintext(in: images) }
+        } else if ClipboardStore.inspect(converting) != .unreadable {
+            ClipboardStore.removeDatabase(at: converting)
+        }
+    }
+
     /// A plaintext history, a conversion a crash interrupted, or its leftover images await `run`.
     static func isPending(database: URL, images: URL) -> Bool {
         let converting = URL(fileURLWithPath: database.path + ".converting")
         return FileManager.default.fileExists(atPath: converting.path)
-            || (FileManager.default.fileExists(atPath: database.path) && userVersion(database) == 0
-                && hasItems(database))
+            || ClipboardStore.inspect(database) == .legacy
             || !plaintextFiles(in: images).isEmpty
     }
 
     static func isSealedStore(_ database: URL) -> Bool {
-        FileManager.default.fileExists(atPath: database.path)
-            && userVersion(database) == Int64(ClipboardStore.schemaVersion)
+        ClipboardStore.inspect(database) == .sealed
     }
 
     private static func convert(
-        _ legacy: URL, into target: URL, images: URL, cipher: ClipboardCipher
+        _ legacy: URL, into target: URL, images: URL, cipher: ClipboardCipher, home: URL
     ) -> Bool {
         var source: OpaquePointer?
         var destination: OpaquePointer?
@@ -67,11 +82,11 @@ nonisolated enum ClipboardEncryptionMigration {
             sqlite3_exec(
                 destination, "PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL;", nil, nil, nil)
                 == SQLITE_OK,
-            ClipboardStore.prepareSchema(destination, cipher: cipher),
+            ClipboardStore.prepareSchema(destination, cipher: cipher) == true,
             sqlite3_exec(destination, ClipboardStore.extractionSchema, nil, nil, nil) == SQLITE_OK,
             sqlite3_exec(destination, "BEGIN IMMEDIATE", nil, nil, nil) == SQLITE_OK
         else { return false }
-        guard copyItems(from: source, to: destination, images: images, cipher: cipher),
+        guard copyItems(from: source, to: destination, images: images, cipher: cipher, home: home),
             copyRecognizedText(from: source, to: destination, cipher: cipher),
             sqlite3_exec(destination, "COMMIT", nil, nil, nil) == SQLITE_OK
         else {
@@ -83,7 +98,7 @@ nonisolated enum ClipboardEncryptionMigration {
 
     private static func copyItems(
         from source: OpaquePointer?, to destination: OpaquePointer?, images: URL,
-        cipher: ClipboardCipher
+        cipher: ClipboardCipher, home: URL
     ) -> Bool {
         var read: OpaquePointer?
         var write: OpaquePointer?
@@ -108,9 +123,12 @@ nonisolated enum ClipboardEncryptionMigration {
             else { continue }
             var imagePath = ClipboardStore.columnString(read, 3)
             if let original = imagePath {
+                switch sealedImage(original, in: images, cipher, home: home) {
+                case .sealed(let sealed): imagePath = sealed
+                case .dropped: continue
                 // An owned image that won't seal stops the conversion before its only copy goes.
-                guard let sealed = sealedImage(original, in: images, cipher) else { return false }
-                imagePath = sealed
+                case .failed: return false
+                }
             }
             let item = ClipboardItem(
                 id: id, kind: kind, text: ClipboardStore.columnString(read, 2),
@@ -124,18 +142,34 @@ nonisolated enum ClipboardEncryptionMigration {
         return true
     }
 
-    /// The path the row should keep; nil when an image of ours exists but could not be sealed.
-    private static func sealedImage(_ path: String, in images: URL, _ cipher: ClipboardCipher) -> String? {
+    private enum ImageOutcome {
+        case sealed(String)
+        /// Not an image this history can vouch for: the row goes, nothing is read.
+        case dropped
+        case failed
+    }
+
+    /// An image of ours is sealed or stops the run; another app's is adopted only past the policy.
+    private static func sealedImage(
+        _ path: String, in images: URL, _ cipher: ClipboardCipher, home: URL
+    ) -> ImageOutcome {
         let sealed = images.appendingPathComponent(ClipboardStore.sealedName(forOriginal: path))
         // A rerun after a crash finds the copy already made, and only trusts it if it opens.
-        if (try? SealedFile.read(sealed, key: cipher.blobKey)) != nil { return sealed.path }
-        // A reference to a file that is gone stays as it was, and shows as missing.
-        guard FileManager.default.fileExists(atPath: path) else { return path }
+        if (try? SealedFile.read(sealed, key: cipher.blobKey)) != nil { return .sealed(sealed.path) }
+        let original = URL(fileURLWithPath: path).standardizedFileURL
+        let owned =
+            !path.split(separator: "/").contains("..")
+            && original.deletingLastPathComponent().path == images.standardizedFileURL.path
+        let isRegularFile =
+            (try? FileManager.default.attributesOfItem(atPath: path))?[.type] as? FileAttributeType
+            == .typeRegular
+        // An older release kept any path a `.rayconfig` named; only what the policy admits is read.
+        guard isRegularFile, owned || RaycastImagePolicy.accepts(path, home: home) else { return .dropped }
         if ClipboardStore.sealBlob(from: path, to: sealed.path, key: cipher.blobKey) {
-            return sealed.path
+            return .sealed(sealed.path)
         }
         // Another app's file is never deleted here, so failing to copy it loses nothing.
-        return path.hasPrefix(images.path + "/") ? nil : path
+        return owned ? .failed : .dropped
     }
 
     /// Recognized text, if the old file ever had text search on; an empty answer becomes NULL.
@@ -195,27 +229,5 @@ nonisolated enum ClipboardEncryptionMigration {
                         as? FileAttributeType == .typeRegular
                 }
         }
-    }
-
-    private static func userVersion(_ database: URL) -> Int64 {
-        scalar(database, "PRAGMA user_version") ?? -1
-    }
-
-    private static func hasItems(_ database: URL) -> Bool {
-        (scalar(database, "SELECT COUNT(*) FROM sqlite_master WHERE name = 'items'") ?? 0) > 0
-    }
-
-    private static func scalar(_ database: URL, _ sql: String) -> Int64? {
-        var db: OpaquePointer?
-        defer { sqlite3_close_v2(db) }
-        guard sqlite3_open_v2(database.path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK else {
-            return nil
-        }
-        var stmt: OpaquePointer?
-        defer { sqlite3_finalize(stmt) }
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK,
-            sqlite3_step(stmt) == SQLITE_ROW
-        else { return nil }
-        return sqlite3_column_int64(stmt, 0)
     }
 }

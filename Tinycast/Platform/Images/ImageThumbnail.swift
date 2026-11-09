@@ -154,7 +154,7 @@ enum ImageThumbnail {
         FileManager.default.fileExists(atPath: copy.url.path)
     }
 
-    /// Pixel dimensions read from image metadata — no full decode, though a sealed file is unsealed.
+    /// Pixel dimensions from image metadata — no full decode, though a sealed file is unsealed.
     static func pixelSize(of url: URL, key: SymmetricKey? = nil) -> CGSize? {
         pixelSize(of: imageSource(url, key: key))
     }

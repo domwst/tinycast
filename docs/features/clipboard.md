@@ -168,9 +168,13 @@ through `ClipboardImageFileProvider`: only a reader that asks for one, such as a
 path, gets an exported copy. AppKit reports the provider finished as soon as it hands the URL over,
 long before the reader opens it, so the copy belongs to the pasteboard generation the image was
 written at instead: every Paster write, the poller's next change of any kind (Tinycast's own marked
-writes included), and stopping capture all retire it. AppKit also fulfils every outstanding promise as
-the app quits, so once the quit is committed `declineCopiesForTermination` stops minting copies and
-the clipboard keeps only the PNG; the launch sweep takes anything a crash left. There is deliberately no
+writes included), and stopping capture all retire it. A retired provider never writes again: it
+answers only while the pasteboard still holds the generation `clearContents` returned for its own
+write, and only while no discard has bumped `ClipboardExports.epoch` since it was attached, so a
+paste asked for after capture stops can't leave a copy nothing would remove. AppKit also fulfils
+every outstanding promise as the app quits, so once the quit is committed
+`declineCopiesForTermination` stops minting copies and the clipboard keeps only the PNG; the launch
+sweep takes anything a crash left. There is deliberately no
 `.string`, which a rich text field would take over the image.
 
 **Tiles and previews decode a copy, not the blob.** A PNG can't decode partially, so a 64px tile of a
@@ -222,7 +226,11 @@ conversion is the only way plaintext could be there.
 **One root key per channel, in the login Keychain.** `ClipboardKeyStore` keeps 32 random bytes
 under `<bundle-id>.clipboard-key`, so the legacy keychain's access list trusts only the app that
 created it and any other process reading it gets the system prompt. `unlock` runs off-main, since a
-Keychain read can wait on that prompt, and decides:
+Keychain read can wait on that prompt. It first finishes a swap a crash interrupted, then classifies
+the file with `ClipboardStore.inspect` — absent, legacy, sealed, discardable, or **unreadable**: there
+but not openable just now (permissions, a lock, an I/O error). An unreadable file, or a sealed one
+whose canary can't be read, keeps the store shut with "couldn't be read from disk", because a read
+that failed says nothing about the key and must never be grounds to replace it. Otherwise it decides:
 
 - **Found, and a sealed store's canary opens under it:** the history opens with it.
 - **Found with no store to vouch for it, or not found** (first launch, a reset Keychain, a deleted
@@ -233,8 +241,10 @@ Keychain read can wait on that prompt, and decides:
 - **Any other error:** the store stays shut for the session and the coordinator shows
   "Clipboard history is locked"; nothing is deleted and nothing new is recorded.
 
-A new key always goes into a freshly created item: the old one is deleted first, because updating an
-item another process planted would keep the access list it chose. A conversion that fails without a
+A new key always goes into a freshly created item: the old one is deleted, the new one added with
+`addSecret` (never an update, so an item another process planted in between is refused rather than
+kept with the access list it chose), and the item read back must hold exactly the new key, or the
+store stays locked. A conversion that fails without a
 crash also keeps the store shut, with its own message, since opening would discard the plaintext
 file it still has to seal; the next launch tries again.
 
@@ -259,9 +269,11 @@ and rename over it. `clipboard-cipher-test` holds the format to all of this.
 **A plaintext history from before encryption is converted once.**
 `ClipboardEncryptionMigration` runs inside `unlock`, even with the feature switched off, so an old
 history never stays plaintext just because capture is off. It builds `clipboard.sqlite3.converting`
-with a rollback journal, sealing each row in `rowid` order and copying each image to a `.sealed` blob
-(Raycast's own files are copied, never touched), then removes the old file, renames the new one into
-place, and deletes the old PNGs and thumbnails. An owned image that fails to seal stops the whole
+with a rollback journal, sealing each row in `rowid` order and copying each image to a `.sealed` blob,
+then removes the old file, renames the new one into place, and deletes the old PNGs and thumbnails.
+An image outside `images/` — an older release kept whatever path a `.rayconfig` named — is copied
+only if `RaycastImagePolicy` admits it, and never touched; a row naming any other file, a folder, a
+link or a file that is gone is dropped without reading it. An owned image that fails to seal stops the whole
 conversion, so its only copy is never deleted. Every step can be repeated after a crash, and
 leftover plaintext images keep it pending until a run removes them, capture on or off. A user who
 skips the release that carries it loses that history instead: the store refuses the old
@@ -270,7 +282,8 @@ skips the release that carries it loses that history instead: the store refuses 
 **Nothing a file names is trusted.** `isOwnedBlob` is the only test of ownership, and it wants a
 direct `.sealed` child of `imagesDir` on the standardized path, so a row naming `images/../x` is
 never pruned, deleted or cleared — every other image path an import hands over is sealed into a
-copy. `sealBlob` reads only a regular file by `lstat`, and a Raycast import only accepts what
+copy. Reads follow the same rule: `imageData` hands out nothing for an image row that isn't an owned
+blob, text recognition only ever unseals one, and a backup exports only a blob this key opens. `sealBlob` reads only a regular file by `lstat`, and a Raycast import only accepts what
 `RaycastImagePolicy` does: a decodable image inside a `com.raycast*` Application Support folder,
 with no `..` and no symlink, so a `.rayconfig` can't put `~/.ssh` into history. Every destructive
 sweep — `open()`'s discard, `removeUnsealedFiles`, the thumbnail orphans, exports and backup
@@ -283,11 +296,13 @@ sealed value's length tells roughly how long a clip is. The key is in the legacy
 whose file is encrypted by the login password alone, so a copy of the disk or an unencrypted backup
 is as safe as that password; the data-protection keychain would tie it to the Mac, but needs a
 signing setup this app doesn't have. Anything able to approve a Keychain prompt as the user, or to
-change the default keychain, can read or redirect the key, and a process already on the account before the store first exists could
-plant both a key and a store it opens; app-level encryption can't outlast an attacker who stays. A
-Keychain item another process created with an access list that refuses Tinycast can't be replaced,
-so it locks the history (a denial, never a disclosure). A backup's staging tree in `Caches` holds plaintext while an export or
-import runs; `AppCore.start` sweeps any a crash left.
+change the default keychain, can read or redirect the key, and a process already on the account
+before the store first exists could plant both a key and a store it opens; app-level encryption
+can't outlast an attacker who stays. Any process running as the user can also delete the store or
+the Keychain item and so force a fresh key at the next launch: that costs the history, never
+discloses it. A Keychain item another process created with an access list that refuses Tinycast
+can't be replaced, so it locks the history (a denial, never a disclosure). A backup's staging tree
+in `Caches` holds plaintext while an export or import runs; `AppCore.start` sweeps any a crash left.
 
 ## Search
 

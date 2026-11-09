@@ -1044,8 +1044,8 @@ struct ClipboardTests {
             let unowned = ClipboardItem(imagePath: original.path, sourceBundleID: nil)
             expect(store.imageKey(for: unowned) == nil, "an unowned image is handed no key")
             expect(
-                store.imageData(for: unowned) == bytes,
-                "and an unowned image's bytes are read as they lie")
+                store.imageData(for: unowned) == nil,
+                "nor are its bytes read: a row naming a path outside the store hands out nothing")
         }
     }
 
