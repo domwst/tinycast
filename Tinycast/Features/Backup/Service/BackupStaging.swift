@@ -14,7 +14,9 @@ struct BackupStaging: Sendable {
         }
         Self.sweep(container, before: Date().addingTimeInterval(-86_400))
         root = container.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        // Plaintext for the length of a run, so readable by its owner alone, like an export.
+        try FileManager.default.createDirectory(
+            at: root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
     }
 
     /// Called at launch with the launch time: every older tree is a dead run's plaintext.

@@ -13,6 +13,16 @@ nonisolated enum ClipboardExports {
 
     /// Whether a copy exists, and the pasteboard generation it was made for.
     private static let state = Mutex<(exported: Bool, generation: Int?)>((false, nil))
+    /// AppKit fulfils every outstanding promise as the app quits; that must not leave a copy behind.
+    private static let declining = Mutex(false)
+
+    static var isDeclining: Bool { declining.withLock { $0 } }
+
+    /// Called once the quit is committed, so no reader is left to have asked for a file.
+    static func declineCopiesForTermination() {
+        declining.withLock { $0 = true }
+        discardPasteboardCopies()
+    }
 
     /// One folder per copy, so each keeps a readable name and goes with its folder.
     static func write(_ data: Data, named name: String = imageName, in root: URL = directory) throws
@@ -83,7 +93,7 @@ final class ClipboardImageFileProvider: NSObject, NSPasteboardItemDataProvider, 
         _ pasteboard: NSPasteboard?, item: NSPasteboardItem,
         provideDataForType type: NSPasteboard.PasteboardType
     ) {
-        guard type == .fileURL else { return }
+        guard type == .fileURL, !ClipboardExports.isDeclining else { return }
         let url = exported.withLock { url -> URL? in
             if url.map({ FileManager.default.fileExists(atPath: $0.path) }) != true {
                 url = try? ClipboardExports.write(data, in: root)

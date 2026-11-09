@@ -182,13 +182,18 @@ nonisolated enum ClipboardEncryptionMigration {
         for url in plaintextFiles(in: images) { try? FileManager.default.removeItem(at: url) }
     }
 
+    /// Regular files only, in real folders only: a planted link must not aim this at other files.
     private static func plaintextFiles(in images: URL) -> [URL] {
         let thumbnails = images.appending(path: ".thumbnails", directoryHint: .isDirectory)
-        return [images, thumbnails].flatMap { folder -> [URL] in
+        return [images, thumbnails].filter(ClipboardStore.isRealDirectory).flatMap { folder -> [URL] in
             let names = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
             return names
                 .filter { !$0.hasPrefix(".") && !$0.hasSuffix("." + SealedFile.fileExtension) }
                 .map { folder.appendingPathComponent($0) }
+                .filter {
+                    (try? FileManager.default.attributesOfItem(atPath: $0.path))?[.type]
+                        as? FileAttributeType == .typeRegular
+                }
         }
     }
 

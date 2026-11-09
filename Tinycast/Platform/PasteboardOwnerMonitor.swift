@@ -54,7 +54,9 @@ final class PasteboardOwnerMonitor: Sendable {
     private let state = Mutex(State())
 
     deinit {
-        state.withLock { $0.process?.terminate() }
+        state.withLock { state in
+            if let process = state.process, process.isRunning { process.terminate() }
+        }
     }
 
     /// True while a stream is running, so a caller may wait one beat for a generation's line.
@@ -88,7 +90,8 @@ final class PasteboardOwnerMonitor: Sendable {
             defer { state.process = nil }
             return state.process
         }
-        process?.terminate()
+        // `terminate()` raises on a process not yet run; `launch` catches that case itself.
+        if let process, process.isRunning { process.terminate() }
     }
 
     private func launch() {
@@ -124,7 +127,13 @@ final class PasteboardOwnerMonitor: Sendable {
         guard accepted else { return }
         do {
             try process.run()
-            state.withLock { $0.streaming = $0.process.map(ObjectIdentifier.init) == identity }
+            let current = state.withLock { state -> Bool in
+                let current = state.process.map(ObjectIdentifier.init) == identity
+                state.streaming = current
+                return current
+            }
+            // A `stop` that ran between publishing and launching found nothing it could end.
+            if !current, process.isRunning { process.terminate() }
         } catch {
             state.withLock { state in
                 if state.process.map(ObjectIdentifier.init) == identity { state.process = nil }

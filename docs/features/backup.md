@@ -115,7 +115,8 @@ and asserts nothing escapes.
 
 **Staging lives in `Caches`, not `temporaryDirectory`.** Export unseals each clipboard image into
 it as a PNG and writes the clips' text as JSONL, so for the length of a run the staging tree is
-plaintext; it is the archive that leaves the Mac encrypted. Opening a file to import extracts only
+plaintext, which is why each run's folder is created 0700; it is the archive that leaves the Mac
+encrypted. Opening a file to import extracts only
 its manifest (`open(…, only:)`), so the pane shows categories and counts without unpacking a
 history; Import unpacks the whole file again, applies it and discards the tree before returning.
 Leaving the Settings pane discards a tree the user opened but never imported; `BackupStaging` sweeps
@@ -151,7 +152,9 @@ not silent, because a settings file that quietly changes hotkeys is hostile.
 Per category:
 
 - **Settings** merge field by field, and a file carrying custom commands or their shortcuts still hits
-  `confirmExecutableImport` first.
+  `confirmExecutableImport` first. The clipboard's excluded apps are merged rather than replaced, a
+  Raycast import's included: a file someone sends can add to what is kept out of history, never
+  shrink it.
 - **Clipboard** streams through `ClipboardStore.importStoredItems`, off the main actor and on its own
   connection: a restored history runs past the memory window and must never sit in memory or freeze the
   UI. A row is deduped on its text, or on the path its image takes; the staged `<name>.png` is

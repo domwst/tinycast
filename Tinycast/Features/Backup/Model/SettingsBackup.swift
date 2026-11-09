@@ -267,6 +267,11 @@ extension SettingsBackup {
     }
 
     @discardableResult
+    /// The existing list, then whatever the file adds; nothing the reader excluded is dropped.
+    static func merged(_ existing: [String], _ incoming: [String]) -> [String] {
+        existing + incoming.filter { !existing.contains($0) }
+    }
+
     func apply(to core: AppCore) -> ApplySummary {
         var summary = ApplySummary()
         if let s = settings { summary.settingsFields = applySettings(s, to: core) }
@@ -323,8 +328,9 @@ extension SettingsBackup {
             settings.clipboardRetention = retention
             count += 1
         }
+        // Merged, never replaced: a file someone sends must not shrink what is kept out of history.
         if let apps = s.clipboardDisabledApps {
-            settings.clipboardDisabledApps = apps
+            settings.clipboardDisabledApps = Self.merged(settings.clipboardDisabledApps, apps)
             count += 1
         }
         if let raw = s.clipboardDefaultAction, let action = ClipboardDefaultAction(rawValue: raw) {

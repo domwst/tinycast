@@ -140,9 +140,11 @@ copies while Finder or anything else stays frontmost and marks nothing concealed
 Reading a promised type runs the writer's code, which could replace the board with a concealed
 copy mid-read, so the generation is checked again after the content is read and before it is
 recorded. History records the writer's outermost app, so an Xcode helper reads as Xcode; a writer in no app
-bundle, such as `pbcopy`, records the frontmost app as before. Every witness fails safe: a macOS
-without the SkyLight symbols, a user `log stream` refuses (it gives up after three quick exits) or a
-changed log line leaves the frontmost app as the only vote. The message text is `pboard`'s debug
+bundle, such as `pbcopy`, records the frontmost app as before. Every witness degrades to what
+existed before it: a macOS without the SkyLight symbols, a user `log stream` refuses (it gives up
+after three quick exits), a changed or ambiguous log line, or a process that kills the stream all
+leave the frontmost app as the only vote, which nothing can override. The writer signal raises the
+bar against an ordinary helper; it is not a boundary against a process already on the account. The message text is `pboard`'s debug
 output, not API, so `clipboard-source-test` pins the parser to the observed line and checks the live
 stream against a pasteboard of its own.
 
@@ -166,7 +168,9 @@ through `ClipboardImageFileProvider`: only a reader that asks for one, such as a
 path, gets an exported copy. AppKit reports the provider finished as soon as it hands the URL over,
 long before the reader opens it, so the copy belongs to the pasteboard generation the image was
 written at instead: every Paster write, the poller's next change of any kind (Tinycast's own marked
-writes included), and stopping capture all retire it, and the launch sweep takes any a quit left. There is deliberately no
+writes included), and stopping capture all retire it. AppKit also fulfils every outstanding promise as
+the app quits, so once the quit is committed `declineCopiesForTermination` stops minting copies and
+the clipboard keeps only the PNG; the launch sweep takes anything a crash left. There is deliberately no
 `.string`, which a rich text field would take over the image.
 
 **Tiles and previews decode a copy, not the blob.** A PNG can't decode partially, so a 64px tile of a

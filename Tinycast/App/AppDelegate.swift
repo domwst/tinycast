@@ -37,6 +37,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // A 300 ms-debounced draft still has to reach disk, but it can no longer veto the quit.
             await AppCore.shared.flushNotesForTermination()
             self?.terminationRequestInFlight = false
+            ClipboardExports.declineCopiesForTermination()
             sender.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater
