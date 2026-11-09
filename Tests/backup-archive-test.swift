@@ -30,6 +30,7 @@ struct BackupArchiveTest {
         defer { try? FileManager.default.removeItem(at: root) }
 
         roundTrip(in: root)
+        encryption(in: root)
         clipboardLines(in: root)
         noAbsolutePathsEscape(in: root)
         formatGuard(in: root)
@@ -38,6 +39,7 @@ struct BackupArchiveTest {
         refusesSymbolicLinks(in: root)
         categoriesAreComplete()
         staging()
+        launchSweep()
 
         print(failures == 0 ? "\nALL PASSED" : "\n\(failures) FAILED")
         exit(failures == 0 ? 0 : 1)
@@ -65,8 +67,8 @@ struct BackupArchiveTest {
         let archive = root.appendingPathComponent("out.tinycast")
         let opened = root.appendingPathComponent("open")
         do {
-            try BackupArchive.seal(directory: source, into: archive)
-            try BackupArchive.open(file: archive, into: opened)
+            try BackupArchive.seal(directory: source, into: archive, passphrase: passphrase)
+            try BackupArchive.open(file: archive, into: opened, passphrase: passphrase)
         } catch {
             check("seal and open succeed (\(error))", false)
             return
@@ -100,6 +102,129 @@ struct BackupArchiveTest {
         check(
             "the extracted file is owned by the current user",
             (attributes?[.ownerAccountID] as? NSNumber)?.uint32Value == getuid())
+    }
+
+    // MARK: - Encryption
+
+    static let passphrase = "correct horse battery staple"
+
+    static func encryption(in root: URL) {
+        let source = root.appendingPathComponent("secret")
+        let bundle = BackupBundle(root: source)
+        try? bundle.prepare([.clipboard])
+        let marker = "MARKER-\(UUID().uuidString)"
+        if let writer = try? bundle.clipboardWriter() {
+            try? writer.write(
+                BackupClipboardItem(
+                    kind: .text, text: marker, imageName: nil, createdAt: Date(),
+                    sourceBundleID: nil, pinnedAt: nil))
+        }
+        try? bundle.writeManifest(
+            BackupManifest(appVersion: "1", createdAt: Date(), counts: ["clipboard": 1]))
+        let archive = root.appendingPathComponent("secret.tinycast")
+        do {
+            try BackupArchive.seal(directory: source, into: archive, passphrase: passphrase)
+        } catch {
+            check("an encrypted backup seals (\(error))", false)
+            return
+        }
+        let sealed = (try? Data(contentsOf: archive)) ?? Data()
+        check("a sealed backup is recognised as encrypted", BackupArchive.isEncrypted(file: archive))
+        check("no clip text survives in the sealed bytes", sealed.range(of: Data(marker.utf8)) == nil)
+
+        check(
+            "opening without a passphrase asks for one",
+            openError(archive, passphrase: nil, in: root) == .passphraseRequired)
+        check(
+            "an empty passphrase asks for one",
+            openError(archive, passphrase: "", in: root) == .passphraseRequired)
+        check(
+            "a wrong passphrase is reported as one",
+            openError(archive, passphrase: "correct horse battery stapler", in: root)
+                == .incorrectPassphrase)
+
+        let decomposed = "caf\u{0065}\u{0301} au lait et croissant"
+        let composed = "caf\u{00E9} au lait et croissant"
+        let accented = root.appendingPathComponent("accented.tinycast")
+        try? BackupArchive.seal(directory: source, into: accented, passphrase: decomposed)
+        check(
+            "a passphrase typed composed opens one typed decomposed",
+            openError(accented, passphrase: composed, in: root) == nil)
+
+        do {
+            try BackupArchive.seal(
+                directory: source, into: root.appendingPathComponent("short.tinycast"),
+                passphrase: "seven77")
+            check("a short passphrase is refused", false)
+        } catch {
+            check(
+                "a short passphrase is refused",
+                error as? BackupArchive.ArchiveError == .passphraseTooShort)
+        }
+        let derived = BackupArchive.archivePassword(for: "x")
+        check("the derived password fits AEA's bounds", (20...256).contains(derived.utf8.count))
+
+        // Written before encryption existed: plain LZFSE, which must keep importing.
+        let legacy = root.appendingPathComponent("legacy.tinycast")
+        let legacyBuilt = writeFixture(legacy, encrypted: false) { encoder in
+            try encoder.writeDirectoryContents(
+                archiveFrom: FilePath(source.path),
+                keySet: ArchiveHeader.FieldKeySet("TYP,PAT,DAT,MOD,MTM")!)
+        }
+        check("the legacy fixture can be built", legacyBuilt)
+        check("a legacy backup is not mistaken for encrypted", !BackupArchive.isEncrypted(file: legacy))
+        let legacyOut = root.appendingPathComponent("legacy-out")
+        do {
+            try BackupArchive.open(file: legacy, into: legacyOut, passphrase: nil)
+            check(
+                "a legacy backup still opens",
+                Array(BackupBundle(root: legacyOut).clipboardItems()).first?.text == marker)
+        } catch {
+            check("a legacy backup still opens (\(error))", false)
+        }
+    }
+
+    static func openError(
+        _ archive: URL, passphrase: String?, in root: URL
+    ) -> BackupArchive.ArchiveError? {
+        let into = root.appendingPathComponent("open-\(UUID().uuidString)")
+        do {
+            try BackupArchive.open(file: archive, into: into, passphrase: passphrase)
+            return nil
+        } catch {
+            return error as? BackupArchive.ArchiveError ?? .cannotRead
+        }
+    }
+
+    /// Hand-built archives, so each guard runs behind both the encrypted and the legacy reader.
+    static func writeFixture(
+        _ archive: URL, encrypted: Bool, _ body: (ArchiveStream) throws -> Void
+    ) -> Bool {
+        guard
+            let destination = ArchiveByteStream.fileStream(
+                path: FilePath(archive.path), mode: .writeOnly, options: [.create, .truncate],
+                permissions: FilePermissions(rawValue: 0o600))
+        else { return false }
+        let stream: ArchiveByteStream?
+        if encrypted {
+            let context = ArchiveEncryptionContext(
+                profile: .hkdf_sha256_aesctr_hmac__scrypt__none, compressionAlgorithm: .lzfse)
+            guard (try? context.setPassword(BackupArchive.archivePassword(for: passphrase))) != nil
+            else { return false }
+            stream = ArchiveByteStream.encryptionStream(
+                writingTo: destination, encryptionContext: context)
+        } else {
+            stream = ArchiveByteStream.compressionStream(using: .lzfse, writingTo: destination)
+        }
+        guard let stream else { return false }
+        do {
+            try ArchiveStream.withEncodeStream(writingTo: stream, body)
+            try stream.close()
+            try destination.close()
+            return true
+        } catch {
+            return false
+        }
     }
 
     // MARK: - Clipboard
@@ -175,7 +300,7 @@ struct BackupArchiveTest {
         try? Data("not an archive".utf8).write(to: file)
         let into = root.appendingPathComponent("garbage-out")
         do {
-            try BackupArchive.open(file: file, into: into)
+            try BackupArchive.open(file: file, into: into, passphrase: passphrase)
             check("a non-archive is refused", false)
         } catch {
             check("a non-archive is refused", true)
@@ -193,28 +318,19 @@ struct BackupArchiveTest {
 
     /// A hostile archive must not write outside the directory the caller chose.
     static func refusesTraversal(in root: URL) {
-        // Header-by-header: `writeDirectoryContents` refuses to emit the `..` path we need here.
-        let archive = root.appendingPathComponent("evil.tinycast")
         let payload = Data("escaped".utf8)
-        guard
-            let destination = ArchiveByteStream.fileStream(
-                path: FilePath(archive.path), mode: .writeOnly, options: [.create, .truncate],
-                permissions: FilePermissions(rawValue: 0o600)),
-            let compressor = ArchiveByteStream.compressionStream(
-                using: .lzfse, writingTo: destination)
-        else {
-            check("the traversal fixture can be built", false)
-            return
-        }
-        do {
-            try ArchiveStream.withEncodeStream(writingTo: compressor) { encoder in
+        for encrypted in [true, false] {
+            let label = encrypted ? "encrypted" : "legacy"
+            // Header-by-header: `writeDirectoryContents` refuses to emit the `..` path we need here.
+            let archive = root.appendingPathComponent("evil-\(label).tinycast")
+            let built = writeFixture(archive, encrypted: encrypted) { encoder in
                 let header = ArchiveHeader()
                 header.append(
                     .uint(
                         key: ArchiveHeader.FieldKey("TYP"),
                         value: UInt64(ArchiveHeader.EntryType.regularFile.rawValue)))
                 header.append(
-                    .string(key: ArchiveHeader.FieldKey("PAT"), value: "../escape.txt"))
+                    .string(key: ArchiveHeader.FieldKey("PAT"), value: "../escape-\(label).txt"))
                 header.append(.uint(key: ArchiveHeader.FieldKey("MOD"), value: 0o644))
                 header.append(
                     .blob(key: ArchiveHeader.FieldKey("DAT"), size: UInt64(payload.count)))
@@ -223,36 +339,23 @@ struct BackupArchiveTest {
                     try encoder.writeBlob(key: ArchiveHeader.FieldKey("DAT"), from: buffer)
                 }
             }
-            try compressor.close()
-            try destination.close()
-        } catch {
-            check("the traversal fixture can be built (\(error))", false)
-            return
-        }
+            check("the \(label) traversal fixture can be built", built)
 
-        let into = root.appendingPathComponent("evil-out", isDirectory: true)
-        try? BackupArchive.open(file: archive, into: into)
-        let escaped = root.appendingPathComponent("escape.txt")
-        check(
-            "an entry naming `..` never lands outside the destination",
-            !FileManager.default.fileExists(atPath: escaped.path))
+            let into = root.appendingPathComponent("evil-out-\(label)", isDirectory: true)
+            try? BackupArchive.open(file: archive, into: into, passphrase: passphrase)
+            let escaped = root.appendingPathComponent("escape-\(label).txt")
+            check(
+                "\(label): an entry naming `..` never lands outside the destination",
+                !FileManager.default.fileExists(atPath: escaped.path))
+        }
     }
 
     /// A link entry names no `..` at all, and reading through it would leave the extract.
     static func refusesSymbolicLinks(in root: URL) {
-        let archive = root.appendingPathComponent("linked.tinycast")
-        guard
-            let destination = ArchiveByteStream.fileStream(
-                path: FilePath(archive.path), mode: .writeOnly, options: [.create, .truncate],
-                permissions: FilePermissions(rawValue: 0o600)),
-            let compressor = ArchiveByteStream.compressionStream(
-                using: .lzfse, writingTo: destination)
-        else {
-            check("the symlink fixture can be built", false)
-            return
-        }
-        do {
-            try ArchiveStream.withEncodeStream(writingTo: compressor) { encoder in
+        for encrypted in [true, false] {
+            let label = encrypted ? "encrypted" : "legacy"
+            let archive = root.appendingPathComponent("linked-\(label).tinycast")
+            let built = writeFixture(archive, encrypted: encrypted) { encoder in
                 let header = ArchiveHeader()
                 // 76 is `L`; the Swift overlay names no symbolic-link case to spell it with.
                 header.append(.uint(key: ArchiveHeader.FieldKey("TYP"), value: 76))
@@ -262,21 +365,17 @@ struct BackupArchiveTest {
                 header.append(.uint(key: ArchiveHeader.FieldKey("MOD"), value: 0o777))
                 try encoder.writeHeader(header)
             }
-            try compressor.close()
-            try destination.close()
-        } catch {
-            check("the symlink fixture can be built (\(error))", false)
-            return
-        }
+            check("the \(label) symlink fixture can be built", built)
 
-        let into = root.appendingPathComponent("linked-out", isDirectory: true)
-        do {
-            try BackupArchive.open(file: archive, into: into)
-            check("an archive carrying a symlink is refused", false)
-        } catch {
-            check(
-                "an archive carrying a symlink is refused",
-                error as? BackupArchive.ArchiveError == .cannotRead)
+            let into = root.appendingPathComponent("linked-out-\(label)", isDirectory: true)
+            do {
+                try BackupArchive.open(file: archive, into: into, passphrase: passphrase)
+                check("\(label): an archive carrying a symlink is refused", false)
+            } catch {
+                check(
+                    "\(label): an archive carrying a symlink is refused",
+                    error as? BackupArchive.ArchiveError == .cannotRead)
+            }
         }
     }
 
@@ -318,5 +417,28 @@ struct BackupArchiveTest {
             !FileManager.default.fileExists(atPath: staging.root.path))
         staging.discard()
         check("discard is idempotent", true)
+    }
+
+    /// A crashed export leaves plaintext in Caches; launch reclaims it however recent.
+    static func launchSweep() {
+        let base = scratch()
+        defer { try? FileManager.default.removeItem(at: base) }
+        guard let orphan = try? BackupStaging(base: base) else {
+            check("an orphan staging tree can be made", false)
+            return
+        }
+        let launched = Date().addingTimeInterval(1)
+        Thread.sleep(forTimeInterval: 1.1)
+        guard let live = try? BackupStaging(base: base) else {
+            check("a live staging tree can be made", false)
+            return
+        }
+        BackupStaging.sweepOrphans(before: launched, base: base)
+        check(
+            "the launch sweep removes a tree from before launch",
+            !FileManager.default.fileExists(atPath: orphan.root.path))
+        check(
+            "the launch sweep keeps a tree made after launch",
+            FileManager.default.fileExists(atPath: live.root.path))
     }
 }

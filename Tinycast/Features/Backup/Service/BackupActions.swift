@@ -52,10 +52,13 @@ enum BackupActions {
 
     /// Composes off-main, then seals — a clipboard history runs to gigabytes.
     static func exportBackup(
-        core: AppCore, categories: Set<BackupCategory>
+        core: AppCore, categories: Set<BackupCategory>, passphrase: String
     ) async throws
         -> BackupComposer.Result
     {
+        guard passphrase.count >= BackupArchive.minimumPassphraseLength else {
+            throw BackupArchive.ArchiveError.passphraseTooShort
+        }
         guard let destination = chooseSaveLocation(named: "Tinycast", type: .tinycastBackup) else {
             throw CancellationError()
         }
@@ -64,17 +67,23 @@ enum BackupActions {
             let staging = try BackupStaging()
             defer { staging.discard() }
             let result = try BackupComposer.write(plan, into: staging.bundle)
-            try BackupArchive.seal(directory: staging.root, into: destination)
+            try BackupArchive.seal(directory: staging.root, into: destination, passphrase: passphrase)
             return result
         }.value
     }
 
+    static func isEncryptedBackup(_ file: URL) -> Bool {
+        BackupArchive.isEncrypted(file: file)
+    }
+
     /// Opens the archive and reads its manifest, leaving staging for the caller to apply and discard.
-    static func openBackup(at file: URL) async throws -> (BackupStaging, BackupManifest) {
+    static func openBackup(
+        at file: URL, passphrase: String?
+    ) async throws -> (BackupStaging, BackupManifest) {
         try await Task.detached(priority: .userInitiated) {
             let staging = try BackupStaging()
             do {
-                try BackupArchive.open(file: file, into: staging.root)
+                try BackupArchive.open(file: file, into: staging.root, passphrase: passphrase)
                 return (staging, try staging.bundle.readManifest())
             } catch {
                 staging.discard()
@@ -97,39 +106,6 @@ enum BackupActions {
             else { return nil }
         }
         return await BackupApplier.apply(categories, from: bundle, to: core)
-    }
-
-    /// The launcher has no picker, so its commands take everything; the pane is where you choose.
-    static func runExportCommand(core: AppCore) async {
-        do {
-            let result = try await exportBackup(core: core, categories: BackupCategory.all)
-            await present(
-                core: core, title: String(localized: "Backup Exported"), message: exportText(result),
-                symbol: exportSymbol, tone: .success)
-        } catch is CancellationError {
-        } catch {
-            await present(
-                core: core, title: String(localized: "Export Failed"),
-                message: error.localizedDescription, symbol: exportSymbol)
-        }
-    }
-
-    static func runImportCommand(core: AppCore) async {
-        guard let file = chooseBackupFile() else { return }
-        do {
-            let (staging, manifest) = try await openBackup(at: file)
-            defer { staging.discard() }
-            guard
-                let summary = await applyBackup(manifest.categories, from: staging, to: core)
-            else { return }
-            await present(
-                core: core, title: String(localized: "Backup Imported"),
-                message: summaryText(summary), symbol: importSymbol, tone: .success)
-        } catch {
-            await present(
-                core: core, title: String(localized: "Import Failed"),
-                message: error.localizedDescription, symbol: importSymbol)
-        }
     }
 
     // MARK: - Raycast (the pane owns the passphrase field + inline status)
@@ -372,11 +348,4 @@ enum BackupActions {
 
     /// Every import dialog carries the same glyph, so the flow reads as one thing.
     private static let importSymbol = "square.and.arrow.down"
-    private static let exportSymbol = "square.and.arrow.up"
-
-    private static func present(
-        core: AppCore, title: String, message: String, symbol: String, tone: DialogTone = .danger
-    ) async {
-        await core.showNotice(title: title, message: message, symbol: symbol, tone: tone)
-    }
 }

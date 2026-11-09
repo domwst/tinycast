@@ -979,7 +979,11 @@ Debug answers `tinycast-dev://`; use that scheme for every link below.
   round trip preserve the choice.
 - Every pane renders and the sidebar switches without flicker
 - A feature switch takes effect in the launcher immediately; every setting survives relaunch
-- Export produces a `.tinycast`; import applies it and reports a per-category summary
+- Export stays disabled until the passphrase has 8+ characters and the confirmation matches; it then
+  produces a `.tinycast` starting `AEA1`, and `strings` on it finds no clip or note text
+- Import asks for the passphrase, reports a wrong one inline under Import, then applies the backup
+  and reports a per-category summary. A `.tinycast` exported before encryption opens with no prompt
+- Export Settings and Import Settings from the launcher open Settings → Backup at their section
 - Untick a category on export, and the import picker greys that row out rather than offering it
 - Untick a category on **import** and confirm it did not arrive, while the ticked ones did
 - An image clip round-trips and still renders; the archive can then be deleted without breaking it

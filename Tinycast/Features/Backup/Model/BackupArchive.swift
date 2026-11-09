@@ -1,19 +1,33 @@
 import AppleArchive
+import CryptoKit
 import Foundation
 import System
 
 enum BackupArchive {
     static let fileExtension = "tinycast"
 
+    /// Typed by a person and guessable offline, so anything shorter is refused before sealing.
+    static let minimumPassphraseLength = 8
+
     enum ArchiveError: LocalizedError, Equatable {
         case cannotWrite
         case cannotRead
+        case passphraseRequired
+        case passphraseTooShort
+        case incorrectPassphrase
 
         var errorDescription: String? {
             switch self {
             case .cannotWrite: return String(localized: "Couldn't write the backup file.")
             case .cannotRead:
                 return String(localized: "This file isn't a Tinycast backup, or it's damaged.")
+            case .passphraseRequired:
+                return String(localized: "This backup is encrypted. Enter its passphrase.")
+            case .passphraseTooShort:
+                return String(
+                    localized: "Use a passphrase of at least \(minimumPassphraseLength) characters.")
+            case .incorrectPassphrase:
+                return String(localized: "Incorrect passphrase, or the backup is damaged.")
             }
         }
     }
@@ -23,44 +37,99 @@ enum BackupArchive {
         ArchiveHeader.FieldKeySet("TYP,PAT,DAT,MOD,MTM")
     }
 
-    /// LZFSE, not LZMA: the payload is dominated by PNGs that are already compressed.
-    static func seal(directory: URL, into file: URL) throws {
+    /// Apple Encrypted Archive: scrypt-derived key, AES-CTR + HMAC, LZFSE inside the encryption.
+    static func seal(directory: URL, into file: URL, passphrase: String) throws {
+        let context = try encryptionContext(passphrase: passphrase)
         guard let keySet,
             let destination = ArchiveByteStream.fileStream(
                 path: FilePath(file.path), mode: .writeOnly, options: [.create, .truncate],
                 permissions: FilePermissions(rawValue: 0o600)),
-            let compressor = ArchiveByteStream.compressionStream(
-                using: .lzfse, writingTo: destination)
+            let encryptor = ArchiveByteStream.encryptionStream(
+                writingTo: destination, encryptionContext: context)
         else { throw ArchiveError.cannotWrite }
         var sealed = false
         defer {
             if !sealed {
-                try? compressor.close()
+                try? encryptor.close()
                 try? destination.close()
             }
         }
-        try ArchiveStream.withEncodeStream(writingTo: compressor) { encoder in
+        try ArchiveStream.withEncodeStream(writingTo: encryptor) { encoder in
             try encoder.writeDirectoryContents(
                 archiveFrom: FilePath(directory.path), keySet: keySet)
         }
         // Explicit, not `try?`: the last block flushes in `close`, so a truncated write must throw.
-        try compressor.close()
+        try encryptor.close()
         try destination.close()
         sealed = true
     }
 
-    static func open(file: URL, into directory: URL) throws {
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    /// Reads only the container header, so the pane can ask for a passphrase before opening.
+    static func isEncrypted(file: URL) -> Bool {
         guard
             let source = ArchiveByteStream.fileStream(
-                path: FilePath(file.path), mode: .readOnly, options: [], permissions: []),
-            let decompressor = ArchiveByteStream.decompressionStream(readingFrom: source)
-        else { throw ArchiveError.cannotRead }
-        defer {
-            try? decompressor.close()
-            try? source.close()
+                path: FilePath(file.path), mode: .readOnly, options: [], permissions: [])
+        else { return false }
+        defer { try? source.close() }
+        return ArchiveEncryptionContext(from: source) != nil
+    }
+
+    /// An encrypted file needs `passphrase`; one written before encryption opens without it.
+    static func open(file: URL, into directory: URL, passphrase: String?) throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        guard let source = fileStream(file) else { throw ArchiveError.cannotRead }
+        defer { try? source.close() }
+        if let context = ArchiveEncryptionContext(from: source) {
+            guard let passphrase, !passphrase.isEmpty else { throw ArchiveError.passphraseRequired }
+            try context.setPassword(archivePassword(for: passphrase))
+            guard
+                let decryptor = ArchiveByteStream.decryptionStream(
+                    readingFrom: source, encryptionContext: context)
+            else { throw ArchiveError.incorrectPassphrase }
+            defer { try? decryptor.close() }
+            try extract(from: decryptor, into: directory)
+        } else {
+            // The header probe consumed bytes, so the unencrypted path reads from a fresh stream.
+            guard let plain = fileStream(file),
+                let decompressor = ArchiveByteStream.decompressionStream(readingFrom: plain)
+            else { throw ArchiveError.cannotRead }
+            defer {
+                try? decompressor.close()
+                try? plain.close()
+            }
+            try extract(from: decompressor, into: directory)
         }
-        guard let decoder = ArchiveStream.decodeStream(readingFrom: decompressor) else {
+        guard !containsSymbolicLink(directory) else { throw ArchiveError.cannotRead }
+    }
+
+    /// AEA accepts 20–256 bytes; a digest fits any typed passphrase while scrypt still sets the cost.
+    static func archivePassword(for passphrase: String) -> String {
+        let normalized = Data(passphrase.precomposedStringWithCanonicalMapping.utf8)
+        let digest = SHA256.hash(data: Data("tinycast-backup-passphrase-v1:".utf8) + normalized)
+        return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func encryptionContext(passphrase: String) throws -> ArchiveEncryptionContext {
+        guard passphrase.count >= minimumPassphraseLength else {
+            throw ArchiveError.passphraseTooShort
+        }
+        let context = ArchiveEncryptionContext(
+            profile: .hkdf_sha256_aesctr_hmac__scrypt__none, compressionAlgorithm: .lzfse)
+        do {
+            try context.setPassword(archivePassword(for: passphrase))
+        } catch {
+            throw ArchiveError.cannotWrite
+        }
+        return context
+    }
+
+    private static func fileStream(_ file: URL) -> ArchiveByteStream? {
+        ArchiveByteStream.fileStream(
+            path: FilePath(file.path), mode: .readOnly, options: [], permissions: [])
+    }
+
+    private static func extract(from stream: ArchiveByteStream, into directory: URL) throws {
+        guard let decoder = ArchiveStream.decodeStream(readingFrom: stream) else {
             throw ArchiveError.cannotRead
         }
         defer { try? decoder.close() }
@@ -73,7 +142,6 @@ enum BackupArchive {
         } catch {
             throw ArchiveError.cannotRead
         }
-        guard !containsSymbolicLink(directory) else { throw ArchiveError.cannotRead }
     }
 
     /// A link entry passes the path filter, and reading through one would leave the extract.

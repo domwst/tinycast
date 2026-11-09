@@ -29,6 +29,10 @@ A backup carries five independently selectable categories, ticked on export and 
 - **The file carries a format version and a reader accepts only its own.** That is a guard, not a
   migration: the comparison is `==`, so an older and a newer file fail identically and by the same
   statement. Writing it any other way is the first line of a backup-format migration, and there is none.
+- **Every export is encrypted, and the passphrase never touches disk.** A `.tinycast` holds clipboard
+  history and notes and gets sent around, so `BackupArchive.seal` takes a passphrase of at least
+  `minimumPassphraseLength` characters and has no unencrypted path. Only `open` still reads a plain
+  LZFSE archive, so a backup written before encryption keeps importing.
 - **Extensions, AI chat history, Keychain material and anything in `Caches` never travel.** An
   extension is third-party code and third-party data; chat history and API keys stay on the Mac that
   had them; a cache regenerates on its own.
@@ -80,6 +84,17 @@ built in memory to encode and again to decode; a line per clip is one small enco
 because a newline inside a clip is escaped as `\n` by the encoder and can never appear raw —
 `backup-archive-test` asserts the line count equals the clip count for exactly that reason.
 
+**Apple Encrypted Archive around it.** `seal` writes through
+`ArchiveByteStream.encryptionStream` with the `hkdf_sha256_aesctr_hmac__scrypt__none` profile: scrypt
+stretches the passphrase, then AES-CTR with an HMAC over every segment, with LZFSE applied inside the
+encryption. The file starts `AEA1`, which is how `isEncrypted` labels a chosen file before a passphrase
+is typed; a wrong passphrase makes `decryptionStream` refuse the header, reported as
+`incorrectPassphrase`. AEA only accepts a password of 20 to 256 bytes, so `archivePassword(for:)` hands
+it the hex SHA-256 of a fixed `tinycast-backup-passphrase-v1:` prefix plus the NFC-normalised
+passphrase: any typed length fits, the same words typed composed or decomposed open the same file, and
+scrypt still sets the cost of every guess. The prefix is part of the format; changing it orphans every
+existing backup.
+
 **AppleArchive, LZFSE, and a deliberately narrow keyset.** `"TYP,PAT,DAT,MOD,MTM"` rather than
 `.defaultForArchive`: no `UID`/`GID`, which would restore another Mac's numeric owner, and no `IDX`,
 whose hardlink dedup would record a link to a blob outside the staged tree. `MTM` stays because the
@@ -96,7 +111,12 @@ and asserts nothing escapes.
 **Staging lives in `Caches`, not `temporaryDirectory`.** It has to sit on the same volume as
 Application Support for a clipboard PNG to cross into the bundle as a hardlink rather than a copy.
 Leaving the Settings pane discards a tree the user opened but never imported; `BackupStaging` sweeps
-anything a day old on the next run, since a run killed mid-flight leaves its tree behind.
+anything a day old on the next run, and `AppCore.start` sweeps every tree older than the launch, since a
+run killed mid-flight leaves its plaintext behind.
+
+**The launcher commands open the pane.** Export Settings and Import Settings land on Settings →
+Backup at their section rather than running headless: both need a passphrase, and the palette's
+dialogs carry no secure field.
 
 ## Coverage, and why it is spelled out
 

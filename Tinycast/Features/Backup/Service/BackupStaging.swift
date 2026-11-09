@@ -5,15 +5,23 @@ struct BackupStaging: Sendable {
     let root: URL
 
     init(base: URL = AppPaths.caches()) throws {
-        let container = base.appendingPathComponent("backup-staging", isDirectory: true)
-        Self.sweep(container)
+        let container = Self.container(in: base)
+        Self.sweep(container, before: Date().addingTimeInterval(-86_400))
         root = container.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     }
 
+    /// Called at launch with the launch time: every older tree is a dead run's plaintext.
+    static func sweepOrphans(before cutoff: Date, base: URL = AppPaths.caches()) {
+        sweep(container(in: base), before: cutoff)
+    }
+
+    private static func container(in base: URL) -> URL {
+        base.appendingPathComponent("backup-staging", isDirectory: true)
+    }
+
     /// A run killed mid-flight leaves its tree behind, and nothing else ever reclaims it.
-    private static func sweep(_ container: URL) {
-        let cutoff = Date().addingTimeInterval(-86_400)
+    private static func sweep(_ container: URL, before cutoff: Date) {
         let keys: Set<URLResourceKey> = [.contentModificationDateKey]
         let orphans =
             (try? FileManager.default.contentsOfDirectory(

@@ -13,9 +13,15 @@ struct BackupSettingsView: View {
     @State private var exportSelection = BackupCategory.all
     @State private var importSelection: Set<BackupCategory> = []
     @State private var exporting = false
+    @State private var exportPassphrase = ""
+    @State private var exportConfirmation = ""
+    @State private var exportStatus: Status?
     @State private var importingBackup = false
-    @State private var backupStatus: Status?
+    @State private var importStatus: Status?
     @State private var backupFile: URL?
+    @State private var backupIsEncrypted = false
+    @State private var backupPassphrase = ""
+    @State private var openingBackup = false
     @State private var openedManifest: BackupManifest?
     /// Held between opening the file and applying it, so the extracted tree survives the picker.
     @State private var openedStaging: BackupStaging?
@@ -52,14 +58,32 @@ struct BackupSettingsView: View {
                     if exporting {
                         ProgressView().controlSize(.small)
                     } else {
-                        Button("Export…") { runExport() }.disabled(exportSelection.isEmpty)
+                        Button("Export…") { runExport() }.disabled(!canExport)
                     }
                 } label: {
                     SettingsRowTitle(.backupExport, "Export Backup")
-                    Text("The ticked items, as one .tinycast file.")
+                    Text("The ticked items, as one encrypted .tinycast file.")
+                }
+                LabeledContent {
+                    passphraseField(
+                        $exportPassphrase,
+                        prompt: Text("At least \(BackupArchive.minimumPassphraseLength) characters"),
+                        onSubmit: runExport)
+                } label: {
+                    Text("Passphrase")
+                    Text("Needed to import the backup. It can't be recovered if you forget it.")
+                }
+                LabeledContent {
+                    passphraseField($exportConfirmation, prompt: Text("Repeat it"), onSubmit: runExport)
+                } label: {
+                    Text("Confirm Passphrase")
+                }
+                if exportPassphrasesDiffer {
+                    Label("The passphrases don't match.", systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
                 }
                 BackupCategorySelection(selection: $exportSelection)
-                if let backupStatus { statusRow(backupStatus) }
+                if let exportStatus { statusRow(exportStatus) }
             } header: {
                 SettingsSectionHeader(.backupExport)
             }
@@ -70,6 +94,25 @@ struct BackupSettingsView: View {
                 } label: {
                     SettingsRowTitle(.backupImport, "Backup File")
                     Text(backupFileSubtitle)
+                }
+                if backupIsEncrypted, openedManifest == nil {
+                    LabeledContent {
+                        passphraseField(
+                            $backupPassphrase, prompt: Text("Backup passphrase"),
+                            onSubmit: openEncryptedBackup)
+                    } label: {
+                        Text("Passphrase")
+                    }
+                    LabeledContent {
+                        if openingBackup {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Button("Open") { openEncryptedBackup() }
+                                .disabled(backupPassphrase.isEmpty)
+                        }
+                    } label: {
+                        Text("Open Backup")
+                    }
                 }
                 if let manifest = openedManifest {
                     BackupCategorySelection(
@@ -85,6 +128,7 @@ struct BackupSettingsView: View {
                         Text("Import")
                     }
                 }
+                if let importStatus { statusRow(importStatus) }
             } header: {
                 SettingsSectionHeader(.backupImport)
             }
@@ -97,16 +141,8 @@ struct BackupSettingsView: View {
                     Text(raycastFileSubtitle)
                 }
                 LabeledContent {
-                    RevealableSecureField(
-                        title: String(localized: "Passphrase"), text: $passphrase,
-                        prompt: Text("Export password")
-                    )
-                    .labelsHidden()
-                    .textFieldStyle(.roundedBorder)
-                    // LabeledContent right-aligns its value text, caret and all; a field reads left.
-                    .multilineTextAlignment(.leading)
-                    .frame(width: 160)
-                    .onSubmit(runRaycastImport)
+                    passphraseField(
+                        $passphrase, prompt: Text("Export password"), onSubmit: runRaycastImport)
                 } label: {
                     Text("Passphrase")
                 }
@@ -170,6 +206,27 @@ struct BackupSettingsView: View {
         }
     }
 
+    private func passphraseField(
+        _ text: Binding<String>, prompt: Text, onSubmit: @escaping () -> Void
+    ) -> some View {
+        RevealableSecureField(title: String(localized: "Passphrase"), text: text, prompt: prompt)
+            .labelsHidden()
+            .textFieldStyle(.roundedBorder)
+            // LabeledContent right-aligns its value text, caret and all; a field reads left.
+            .multilineTextAlignment(.leading)
+            .frame(width: 160)
+            .onSubmit(onSubmit)
+    }
+
+    private var exportPassphrasesDiffer: Bool {
+        !exportConfirmation.isEmpty && exportPassphrase != exportConfirmation
+    }
+
+    private var canExport: Bool {
+        !exportSelection.isEmpty && exportPassphrase == exportConfirmation
+            && exportPassphrase.count >= BackupArchive.minimumPassphraseLength
+    }
+
     @ViewBuilder
     private func statusRow(_ status: Status) -> some View {
         switch status {
@@ -186,7 +243,10 @@ struct BackupSettingsView: View {
         guard let name = backupFile?.lastPathComponent else {
             return String(localized: "A .tinycast file exported from Tinycast.")
         }
-        return openedManifest == nil ? String(localized: "\(name) — couldn't be read") : name
+        if openedManifest != nil { return name }
+        return backupIsEncrypted
+            ? String(localized: "\(name) — encrypted")
+            : String(localized: "\(name) — couldn't be read")
     }
 
     private func available(in manifest: BackupManifest) -> [BackupCategory: Int] {
@@ -197,20 +257,23 @@ struct BackupSettingsView: View {
     }
 
     private func runExport() {
-        guard !exporting else { return }
+        guard !exporting, canExport else { return }
         exporting = true
-        backupStatus = nil
+        exportStatus = nil
         let categories = exportSelection
+        let passphrase = exportPassphrase
         Task {
             defer { exporting = false }
             do {
                 let result = try await BackupActions.exportBackup(
-                    core: core, categories: categories)
-                backupStatus = .success(BackupActions.exportText(result))
+                    core: core, categories: categories, passphrase: passphrase)
+                exportStatus = .success(BackupActions.exportText(result))
+                exportPassphrase = ""
+                exportConfirmation = ""
             } catch is CancellationError {
                 // The user closed the save panel; nothing to report.
             } catch {
-                backupStatus = .failure(error.localizedDescription)
+                exportStatus = .failure(error.localizedDescription)
             }
         }
     }
@@ -219,15 +282,34 @@ struct BackupSettingsView: View {
         guard let url = BackupActions.chooseBackupFile() else { return }
         discardStagedBackup()
         backupFile = url
-        backupStatus = nil
+        backupPassphrase = ""
+        importStatus = nil
+        backupIsEncrypted = BackupActions.isEncryptedBackup(url)
+        if !backupIsEncrypted { openBackup(url, passphrase: nil) }
+    }
+
+    private func openEncryptedBackup() {
+        guard let url = backupFile, backupIsEncrypted, !backupPassphrase.isEmpty, !openingBackup
+        else { return }
+        openBackup(url, passphrase: backupPassphrase)
+    }
+
+    private func openBackup(_ url: URL, passphrase: String?) {
+        openingBackup = true
+        importStatus = nil
         Task {
+            defer { openingBackup = false }
             do {
-                let (staging, manifest) = try await BackupActions.openBackup(at: url)
+                let (staging, manifest) = try await BackupActions.openBackup(
+                    at: url, passphrase: passphrase)
+                // A different file chosen while this one decrypted wins; this tree is stale.
+                guard backupFile == url else { return staging.discard() }
                 openedStaging = staging
                 openedManifest = manifest
                 importSelection = manifest.categories
+                backupPassphrase = ""
             } catch {
-                backupStatus = .failure(error.localizedDescription)
+                importStatus = .failure(error.localizedDescription)
             }
         }
     }
@@ -245,7 +327,8 @@ struct BackupSettingsView: View {
             // Staged files are adopted by the stores during apply, so the tree goes either way.
             discardStagedBackup()
             backupFile = nil
-            if let summary { backupStatus = .success(BackupActions.summaryText(summary)) }
+            backupIsEncrypted = false
+            if let summary { importStatus = .success(BackupActions.summaryText(summary)) }
         }
     }
 

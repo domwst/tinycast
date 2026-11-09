@@ -250,10 +250,10 @@ final class LauncherCoordinator {
             Task { await quicklinkCoordinator.exportQuicklinks() }
         case .exportSettings:
             dismissPalette()
-            Task { await BackupActions.runExportCommand(core: core) }
+            settingsCoordinator.showSettings(tab: .backup, revealing: .section(.backupExport))
         case .importSettings:
             dismissPalette()
-            Task { await BackupActions.runImportCommand(core: core) }
+            settingsCoordinator.showSettings(tab: .backup, revealing: .section(.backupImport))
         case .importFromRaycast:
             dismissPalette()
             settingsCoordinator.showBackupSettings()

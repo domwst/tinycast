@@ -5,9 +5,9 @@ description: Save your setup to one file, choose what to export and what to impo
 
 **Settings → Backup**
 
-A backup is a single `.tinycast` file. You choose what goes into it when you export, and separately
-choose what to restore when you import. So a backup that contains everything can still restore only
-your snippets.
+A backup is a single encrypted `.tinycast` file. You choose what goes into it when you export, and
+separately choose what to restore when you import. So a backup that contains everything can still
+restore only your snippets.
 
 | Category             | What's included                                                                                                     |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------- |
@@ -17,8 +17,18 @@ your snippets.
 | Notes                | Your note Markdown files                                                                                            |
 | Launcher Learning    | Your learned launcher ranking, plus emoji and calculator history                                                    |
 
-The launcher also has **Export Backup** and **Import Backup** commands. They always include
-everything, because there's no room for checkboxes in the launcher.
+The launcher also has **Export Backup** and **Import Backup** commands. They open this pane, because
+every backup needs a passphrase.
+
+## Every backup is encrypted
+
+When you export, you choose a passphrase of at least 8 characters and type it twice. The file is
+encrypted with it, so clipboard history, notes and snippets in a backup can't be read without it.
+Importing asks for the passphrase before it shows what the file contains.
+
+**The passphrase can't be recovered.** Tinycast doesn't store it anywhere, so a backup whose
+passphrase you forget can't be opened. Backups made before encryption was added still import, without
+a passphrase.
 
 ## Read this before relying on it
 
