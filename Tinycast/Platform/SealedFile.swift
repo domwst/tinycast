@@ -13,8 +13,9 @@ enum SealedFile {
 
     private static let magic: [UInt8] = Array("TCSF".utf8)
     private static let version: UInt8 = 1
-    private static let prefixSize = 7
-    private static let headerSize = 12
+    /// Random per file, so every file is sealed under a key of its own and nonces never repeat.
+    private static let saltSize = 16
+    static let headerSize = 5 + 16
     private static let tagSize = 16
 
     /// Whether `url` starts like a sealed file; says nothing about whether the key opens it.
@@ -44,11 +45,12 @@ enum SealedFile {
 
     /// Writes beside `url` and renames over it, so a reader never sees half a file.
     static func write(_ data: Data, to url: URL, key: SymmetricKey) throws {
-        var prefix = [UInt8](repeating: 0, count: prefixSize)
-        guard SecRandomCopyBytes(kSecRandomDefault, prefixSize, &prefix) == errSecSuccess else {
+        var salt = [UInt8](repeating: 0, count: saltSize)
+        guard SecRandomCopyBytes(kSecRandomDefault, saltSize, &salt) == errSecSuccess else {
             throw Failure.unreadable
         }
-        let header = Data(magic + [version] + prefix)
+        let header = Data(magic + [version] + salt)
+        let fileKey = fileKey(key, salt: salt)
         let staging = url.deletingLastPathComponent()
             .appendingPathComponent(".\(url.lastPathComponent).\(UUID().uuidString).partial")
         guard FileManager.default.createFile(
@@ -64,8 +66,8 @@ enum SealedFile {
                 let start = data.startIndex + index * segmentSize
                 let end = min(start + segmentSize, data.endIndex)
                 let sealed = try AES.GCM.seal(
-                    data[start..<end], using: key,
-                    nonce: nonce(prefix: prefix, index: index, final: index == count - 1),
+                    data[start..<end], using: fileKey,
+                    nonce: nonce(index: index, final: index == count - 1),
                     authenticating: header + name)
                 try handle.write(contentsOf: sealed.ciphertext + sealed.tag)
             }
@@ -86,7 +88,7 @@ enum SealedFile {
             let header = try handle.read(upToCount: headerSize), header.count == headerSize,
             Array(header.prefix(magic.count + 1)) == magic + [version]
         else { throw Failure.damaged }
-        let prefix = Array(header.suffix(prefixSize))
+        let fileKey = fileKey(key, salt: Array(header.suffix(saltSize)))
         let name = Data(url.lastPathComponent.utf8)
         var plaintext = Data(capacity: plaintextSize)
         var remaining = size - headerSize
@@ -99,9 +101,9 @@ enum SealedFile {
             remaining -= length
             do {
                 let box = try AES.GCM.SealedBox(
-                    nonce: nonce(prefix: prefix, index: index, final: remaining == 0),
+                    nonce: nonce(index: index, final: remaining == 0),
                     ciphertext: segment.prefix(length - tagSize), tag: segment.suffix(tagSize))
-                plaintext.append(try AES.GCM.open(box, using: key, authenticating: header + name))
+                plaintext.append(try AES.GCM.open(box, using: fileKey, authenticating: header + name))
             } catch {
                 throw Failure.damaged
             }
@@ -110,9 +112,16 @@ enum SealedFile {
         return plaintext
     }
 
-    private static func nonce(prefix: [UInt8], index: Int, final: Bool) throws -> AES.GCM.Nonce {
-        let counter = UInt32(truncatingIfNeeded: index).bigEndian
+    private static func fileKey(_ key: SymmetricKey, salt: [UInt8]) -> SymmetricKey {
+        HKDF<SHA256>.deriveKey(
+            inputKeyMaterial: key, salt: Data(salt), info: Data("tinycast.sealed-file.v1".utf8),
+            outputByteCount: 32)
+    }
+
+    /// Under a key used for this one file, the segment's index and final flag are unique enough.
+    private static func nonce(index: Int, final: Bool) throws -> AES.GCM.Nonce {
+        let counter = UInt64(index).bigEndian
         let counterBytes = withUnsafeBytes(of: counter, Array.init)
-        return try AES.GCM.Nonce(data: prefix + counterBytes + [final ? 1 : 0])
+        return try AES.GCM.Nonce(data: [0, 0, 0] + counterBytes + [final ? 1 : 0])
     }
 }

@@ -31,11 +31,13 @@ nonisolated enum ClipboardKeyStore {
     static func unlock(database: URL, images: URL) -> Unlock {
         let key: SymmetricKey
         switch lookup() {
-        case .found(let found):
-            key = found
         case .unavailable:
             return .unavailable
-        case .missing:
+        case .found(let found)
+        where ClipboardStore.opensSealedStore(at: database, cipher: ClipboardCipher(rootKey: found)):
+            key = found
+        case .found, .missing:
+            // A key no store vouches for is orphaned or planted by another process: never adopted.
             key = ClipboardCipher.makeRootKey()
             // Saved before anything is sealed with it, so no clip can outlive its key.
             guard save(key) else { return .unavailable }

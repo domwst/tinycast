@@ -85,7 +85,8 @@ struct ClipboardCipherTest {
         check("a renamed file fails: its name is authenticated", readError(renamed, key: key) == .damaged)
 
         // Cut exactly after the first two whole segments: only the final flag catches this.
-        let boundary = 12 + 2 * (segment + 16)
+        let header = SealedFile.headerSize
+        let boundary = header + 2 * (segment + 16)
         check(
             "a file cut at a segment boundary fails",
             readError(write(raw.prefix(boundary), as: "original.sealed", in: root, "cut"), key: key)
@@ -104,9 +105,9 @@ struct ClipboardCipherTest {
             "a flipped bit fails",
             readError(write(flipped, as: "original.sealed", in: root, "flip"), key: key) == .damaged)
         var reordered = raw
-        let first = raw.subdata(in: 12..<(12 + segment + 16))
-        let second = raw.subdata(in: (12 + segment + 16)..<(12 + 2 * (segment + 16)))
-        reordered.replaceSubrange(12..<(12 + 2 * (segment + 16)), with: second + first)
+        let first = raw.subdata(in: header..<(header + segment + 16))
+        let second = raw.subdata(in: (header + segment + 16)..<(header + 2 * (segment + 16)))
+        reordered.replaceSubrange(header..<(header + 2 * (segment + 16)), with: second + first)
         check(
             "swapped segments fail",
             readError(write(reordered, as: "original.sealed", in: root, "swap"), key: key)
@@ -140,12 +141,20 @@ struct ClipboardCipherTest {
         try? SealedFile.write(bytes(10), to: url, key: key)
         let raw = (try? Data(contentsOf: url)) ?? Data()
         check("the file starts with its magic and version", Array(raw.prefix(5)) == Array("TCSF".utf8) + [1])
-        check("one segment is header, plaintext and tag", raw.count == 12 + 10 + 16)
+        check("one segment is header, plaintext and tag", raw.count == SealedFile.headerSize + 10 + 16)
         let mode = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.posixPermissions]
         check("only the owner can read it", (mode as? NSNumber)?.intValue == 0o600)
         let leftovers = (try? FileManager.default.contentsOfDirectory(atPath: root.path)) ?? []
         check("no partial file is left behind", !leftovers.contains { $0.hasSuffix(".partial") })
-        check("an impossible size implies nothing", SealedFile.plaintextSize(ofSealedSize: 12 + 15) == nil)
+        check(
+            "an impossible size implies nothing",
+            SealedFile.plaintextSize(ofSealedSize: SealedFile.headerSize + 15) == nil)
+        let other = root.appendingPathComponent("salted.sealed")
+        try? SealedFile.write(bytes(10), to: other, key: key)
+        let otherRaw = (try? Data(contentsOf: other)) ?? Data()
+        check(
+            "every file draws its own salt, so no two share a key",
+            raw.subdata(in: 5..<SealedFile.headerSize) != otherRaw.subdata(in: 5..<SealedFile.headerSize))
     }
 
     // MARK: - ClipboardCipher

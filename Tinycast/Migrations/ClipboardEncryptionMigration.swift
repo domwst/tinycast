@@ -11,7 +11,7 @@ nonisolated enum ClipboardEncryptionMigration {
         guard FileManager.default.fileExists(atPath: database.path) else {
             // Stopped between removing the old file and the swap: the new one is already complete.
             if isSealedStore(converting) {
-                _ = rename(converting.path, database.path)
+                if rename(converting.path, database.path) == 0 { removePlaintext(in: images) }
             } else {
                 ClipboardStore.removeDatabase(at: converting)
             }
@@ -19,6 +19,8 @@ nonisolated enum ClipboardEncryptionMigration {
         }
         guard userVersion(database) == 0, hasItems(database) else {
             ClipboardStore.removeDatabase(at: converting)
+            // Stopped after the swap but before the old images went: finish that now.
+            if isSealedStore(database) { removePlaintext(in: images) }
             return
         }
         ClipboardStore.removeDatabase(at: converting)
@@ -31,12 +33,13 @@ nonisolated enum ClipboardEncryptionMigration {
         removePlaintext(in: images)
     }
 
-    /// A plaintext history, or a conversion a crash interrupted, is still waiting on `run`.
-    static func isPending(database: URL) -> Bool {
+    /// A plaintext history, a conversion a crash interrupted, or its leftover images await `run`.
+    static func isPending(database: URL, images: URL) -> Bool {
         let converting = URL(fileURLWithPath: database.path + ".converting")
         return FileManager.default.fileExists(atPath: converting.path)
             || (FileManager.default.fileExists(atPath: database.path) && userVersion(database) == 0
                 && hasItems(database))
+            || !plaintextFiles(in: images).isEmpty
     }
 
     static func isSealedStore(_ database: URL) -> Bool {
@@ -100,9 +103,15 @@ nonisolated enum ClipboardEncryptionMigration {
             guard let id = ClipboardStore.columnString(read, 0).flatMap(UUID.init(uuidString:)),
                 let kind = ClipboardStore.columnString(read, 1).flatMap(ClipboardItem.Kind.init)
             else { continue }
+            var imagePath = ClipboardStore.columnString(read, 3)
+            if let original = imagePath {
+                // An owned image that won't seal stops the conversion before its only copy goes.
+                guard let sealed = sealedImage(original, in: images, cipher) else { return false }
+                imagePath = sealed
+            }
             let item = ClipboardItem(
                 id: id, kind: kind, text: ClipboardStore.columnString(read, 2),
-                imagePath: sealedImage(ClipboardStore.columnString(read, 3), in: images, cipher),
+                imagePath: imagePath,
                 createdAt: Date(timeIntervalSince1970: sqlite3_column_double(read, 4)),
                 sourceBundleID: ClipboardStore.columnString(read, 5),
                 pinnedAt: sqlite3_column_type(read, 6) == SQLITE_NULL
@@ -112,16 +121,18 @@ nonisolated enum ClipboardEncryptionMigration {
         return true
     }
 
-    /// The sealed copy's path; a reference to a file that is gone stays as it was, shown missing.
-    private static func sealedImage(_ path: String?, in images: URL, _ cipher: ClipboardCipher) -> String? {
-        guard let path else { return nil }
-        let original = URL(fileURLWithPath: path)
+    /// The path the row should keep; nil when an image of ours exists but could not be sealed.
+    private static func sealedImage(_ path: String, in images: URL, _ cipher: ClipboardCipher) -> String? {
         let sealed = images.appendingPathComponent(ClipboardStore.sealedName(forOriginal: path))
         // A rerun after a crash finds the copy already made, and only trusts it if it opens.
         if (try? SealedFile.read(sealed, key: cipher.blobKey)) != nil { return sealed.path }
-        guard FileManager.default.fileExists(atPath: original.path) else { return path }
-        return ClipboardStore.sealBlob(from: path, to: sealed.path, key: cipher.blobKey)
-            ? sealed.path : path
+        // A reference to a file that is gone stays as it was, and shows as missing.
+        guard FileManager.default.fileExists(atPath: path) else { return path }
+        if ClipboardStore.sealBlob(from: path, to: sealed.path, key: cipher.blobKey) {
+            return sealed.path
+        }
+        // Another app's file is never deleted here, so failing to copy it loses nothing.
+        return path.hasPrefix(images.path + "/") ? nil : path
     }
 
     /// Recognized text, if the old file ever had text search on; an empty answer becomes NULL.
@@ -163,14 +174,19 @@ nonisolated enum ClipboardEncryptionMigration {
         return true
     }
 
-    /// Every unsealed blob and every old thumbnail, all of them plaintext copies of history.
+    /// Every unsealed blob and thumbnail, all of them plaintext copies of history.
     private static func removePlaintext(in images: URL) {
-        let entries = (try? FileManager.default.contentsOfDirectory(atPath: images.path)) ?? []
-        for name in entries where !name.hasPrefix(".") && !name.hasSuffix("." + SealedFile.fileExtension) {
-            try? FileManager.default.removeItem(at: images.appendingPathComponent(name))
+        for url in plaintextFiles(in: images) { try? FileManager.default.removeItem(at: url) }
+    }
+
+    private static func plaintextFiles(in images: URL) -> [URL] {
+        let thumbnails = images.appending(path: ".thumbnails", directoryHint: .isDirectory)
+        return [images, thumbnails].flatMap { folder -> [URL] in
+            let names = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
+            return names
+                .filter { !$0.hasPrefix(".") && !$0.hasSuffix("." + SealedFile.fileExtension) }
+                .map { folder.appendingPathComponent($0) }
         }
-        try? FileManager.default.removeItem(
-            at: images.appending(path: ".thumbnails", directoryHint: .isDirectory))
     }
 
     private static func userVersion(_ database: URL) -> Int64 {

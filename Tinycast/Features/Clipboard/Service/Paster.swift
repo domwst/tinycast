@@ -48,6 +48,7 @@ enum Paster {
     @MainActor @discardableResult
     static func copyPlainText(_ text: String) -> Bool {
         let pb = NSPasteboard.general
+        ClipboardExports.discardPasteboardCopies()
         pb.clearContents()
         pb.declareTypes([.string], owner: nil)
         return pb.setString(text, forType: .string)
@@ -65,6 +66,7 @@ enum Paster {
 
     @MainActor
     static func pasteFile(_ url: URL, previousApp: NSRunningApplication?) {
+        ClipboardExports.discardPasteboardCopies()
         PasteboardFiles.write(url, to: .general)
         previousApp?.activate()
         DispatchQueue.main.asyncAfter(deadline: .now() + activationDelay) {
@@ -90,6 +92,7 @@ enum Paster {
     @MainActor
     private static func writeString(_ text: String) {
         let pb = NSPasteboard.general
+        ClipboardExports.discardPasteboardCopies()
         pb.clearContents()
         pb.declareTypes([.string, ClipboardManager.internalType], owner: nil)
         pb.setString(text, forType: .string)
@@ -130,7 +133,9 @@ enum Paster {
             ClipboardImageFileProvider.attach(data, to: entry)
             entry.setData(Data(), forType: ClipboardManager.internalType)
             pb.clearContents()
-            return pb.writeObjects([entry])
+            guard pb.writeObjects([entry]) else { return false }
+            if pb == .general { ClipboardExports.belong(toGeneration: pb.changeCount) }
+            return true
         case .file:
             guard let url = store.fileURL(for: item),
                 FileManager.default.fileExists(atPath: url.path)

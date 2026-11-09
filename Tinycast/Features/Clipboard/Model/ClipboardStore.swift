@@ -248,7 +248,7 @@ final class ClipboardStore {
           id TEXT NOT NULL UNIQUE,
           kind TEXT NOT NULL,
           text BLOB,
-          image_path TEXT,
+          image_path BLOB,
           created_at REAL NOT NULL,
           source_app BLOB,
           pinned_at REAL
@@ -494,11 +494,11 @@ final class ClipboardStore {
         captureGeneration = UUID()
         // RETURNING hands back the deleted blobs in the same pass, so no separate SELECT is needed.
         if db != nil,
-            let stmt = prepare("DELETE FROM items WHERE pinned_at IS NULL RETURNING image_path")
+            let stmt = prepare("DELETE FROM items WHERE pinned_at IS NULL RETURNING id, image_path")
         {
             var orphaned: [String] = []
             while sqlite3_step(stmt) == SQLITE_ROW {
-                if let path = Self.columnString(stmt, 0), owns(path) { orphaned.append(path) }
+                if let path = sealedPath(stmt), owns(path) { orphaned.append(path) }
             }
             sqlite3_finalize(stmt)
             if !orphaned.isEmpty {
@@ -991,7 +991,9 @@ final class ClipboardStore {
             sqlite3_bind_null(stmt, 3)
         }
         if let path = item.imagePath {
-            sqlite3_bind_text(stmt, 4, path, -1, SQLITE_TRANSIENT)
+            // Sealed to its row, so pointing one row at another's blob fails rather than shows it.
+            guard let sealed = cipher.seal(path, field: .imagePath, row: item.id) else { return false }
+            bind(sealed, to: stmt, at: 4)
         } else {
             sqlite3_bind_null(stmt, 4)
         }
@@ -1016,6 +1018,14 @@ final class ClipboardStore {
         }
     }
 
+    /// The blob path of an `id, image_path` row, unsealed with the row's own id.
+    private func sealedPath(_ stmt: OpaquePointer?) -> String? {
+        guard let cipher, let id = Self.columnString(stmt, 0).flatMap(UUID.init(uuidString:)) else {
+            return nil
+        }
+        return Self.sealedString(stmt, 1, .imagePath, id, cipher)
+    }
+
     /// Whether a path is inside our images directory; only those are ours to delete.
     private func owns(_ path: String) -> Bool {
         path.hasPrefix(imagesDir.path + "/")
@@ -1029,7 +1039,7 @@ final class ClipboardStore {
             var staleOwnedPaths: [String] = []
             while sqlite3_step(imagesStmt) == SQLITE_ROW {
                 // Only delete files we own; an external reference just loses its row.
-                if let path = Self.columnString(imagesStmt, 0), owns(path) {
+                if let path = sealedPath(imagesStmt), owns(path) {
                     staleOwnedPaths.append(path)
                 }
             }
@@ -1116,13 +1126,25 @@ final class ClipboardStore {
         pinStmt = prepare("UPDATE items SET pinned_at = ? WHERE id = ?")
         staleImagesStmt = prepare(
             """
-            SELECT image_path FROM items
+            SELECT id, image_path FROM items
             WHERE created_at < ? AND pinned_at IS NULL AND image_path IS NOT NULL
             """)
         deleteStaleStmt = prepare("DELETE FROM items WHERE created_at < ? AND pinned_at IS NULL")
         return insertStmt != nil && loadStmt != nil && windowFloorStmt != nil
             && deleteByIDStmt != nil && pinStmt != nil && staleImagesStmt != nil
             && deleteStaleStmt != nil
+    }
+
+    /// Whether `database` is a sealed store this cipher opens, judged by its canary alone.
+    nonisolated static func opensSealedStore(at database: URL, cipher: ClipboardCipher) -> Bool {
+        guard FileManager.default.fileExists(atPath: database.path) else { return false }
+        var db: OpaquePointer?
+        defer { sqlite3_close_v2(db) }
+        guard sqlite3_open_v2(database.path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK,
+            intValue(db, "PRAGMA user_version") == Int64(schemaVersion),
+            let canary = meta(db, key: "canary")
+        else { return false }
+        return cipher.open(canary, field: .canary, row: canaryRow) == canaryValue
     }
 
     /// A new file gets the schema and a canary; an existing one must be this version and this key.
@@ -1315,8 +1337,13 @@ final class ClipboardStore {
             guard let opened = sealedString(stmt, base + 2, .text, id, cipher) else { return nil }
             text = opened
         }
+        var imagePath: String?
+        if sqlite3_column_type(stmt, base + 3) != SQLITE_NULL {
+            guard let opened = sealedString(stmt, base + 3, .imagePath, id, cipher) else { return nil }
+            imagePath = opened
+        }
         return ClipboardItem(
-            id: id, kind: kind, text: text, imagePath: columnString(stmt, base + 3),
+            id: id, kind: kind, text: text, imagePath: imagePath,
             createdAt: Date(timeIntervalSince1970: sqlite3_column_double(stmt, base + 4)),
             sourceBundleID: sealedString(stmt, base + 5, .source, id, cipher),
             pinnedAt: columnDate(stmt, base + 6))

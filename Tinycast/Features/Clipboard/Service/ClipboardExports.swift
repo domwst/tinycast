@@ -11,8 +11,8 @@ nonisolated enum ClipboardExports {
         AppPaths.caches().appendingPathComponent("clipboard-exports", isDirectory: true)
     }
 
-    /// Set by a write, so a poll with nothing exported never touches the disk.
-    private static let exported = Mutex(false)
+    /// Whether a copy exists, and the pasteboard generation it was made for.
+    private static let state = Mutex<(exported: Bool, generation: Int?)>((false, nil))
 
     /// One folder per copy, so each keeps a readable name and goes with its folder.
     static func write(_ data: Data, named name: String = imageName, in root: URL = directory) throws
@@ -25,14 +25,23 @@ nonisolated enum ClipboardExports {
         guard FileManager.default.createFile(
             atPath: url.path, contents: data, attributes: [.posixPermissions: 0o600])
         else { throw CocoaError(.fileWriteUnknown) }
-        exported.withLock { $0 = true }
+        state.withLock { $0.exported = true }
         return url
     }
 
-    /// Once the clipboard holds something else, no paste can still need a copy made for it.
-    static func discardPasteboardCopies(in root: URL = directory) {
-        guard exported.withLock({ flag in defer { flag = false }; return flag }) else { return }
-        try? FileManager.default.removeItem(at: root)
+    /// The general pasteboard's generation once an image is written, which its copies belong to.
+    static func belong(toGeneration generation: Int) {
+        state.withLock { $0.generation = generation }
+    }
+
+    /// Once the clipboard holds anything else, by anyone's write, no paste can need a copy.
+    static func discardPasteboardCopies(in root: URL = directory, unlessGeneration current: Int? = nil) {
+        let discard = state.withLock { state -> Bool in
+            guard state.exported, current == nil || current != state.generation else { return false }
+            state = (false, nil)
+            return true
+        }
+        if discard { try? FileManager.default.removeItem(at: root) }
     }
 
     static func remove(_ url: URL) {

@@ -282,7 +282,7 @@ enum ClipboardKeyStore {
 }
 
 enum ClipboardEncryptionMigration {
-    static func isPending(database: URL) -> Bool { false }
+    static func isPending(database: URL, images: URL) -> Bool { false }
 }
 
 enum ClipboardExports {

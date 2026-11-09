@@ -158,9 +158,9 @@ row inserts, resident search, and pruning stay on the main actor. A capture is
 `<uuid>.png.sealed`. Copying an image puts its unsealed PNG on the pasteboard and promises a file URL
 through `ClipboardImageFileProvider`: only a reader that asks for one, such as a terminal pasting the
 path, gets an exported copy. AppKit reports the provider finished as soon as it hands the URL over,
-long before the reader opens it, so the copy is kept until the clipboard moves on —
-`discardPasteboardCopies` runs on Tinycast's next write and on the poller's next foreign change —
-and the launch sweep takes any a quit left. There is deliberately no
+long before the reader opens it, so the copy belongs to the pasteboard generation the image was
+written at instead: every Paster write, the poller's next change of any kind (Tinycast's own marked
+writes included), and stopping capture all retire it, and the launch sweep takes any a quit left. There is deliberately no
 `.string`, which a rich text field would take over the image.
 
 **Tiles and previews decode a copy, not the blob.** A PNG can't decode partially, so a 64px tile of a
@@ -214,23 +214,28 @@ under `<bundle-id>.clipboard-key`, so the legacy keychain's access list trusts o
 created it and any other process reading it gets the system prompt. `unlock` runs off-main, since a
 Keychain read can wait on that prompt, and decides:
 
-- **Found:** the history opens with it.
-- **Not found** (first launch, or a reset Keychain): a new key is saved *before* anything is sealed
-  with it, and any history sealed under the lost key is deleted with its blobs, since nothing can
-  ever open it again. A garbled item counts as not found.
+- **Found, and a sealed store's canary opens under it:** the history opens with it.
+- **Found with no store to vouch for it, or not found** (first launch, a reset Keychain, a deleted
+  store): a new key is saved over the item *before* anything is sealed with it, and any history
+  sealed under another key is deleted with its blobs, since nothing can ever open it again. A key
+  is never adopted on its own word, because any process running as the user can create that item
+  first; a garbled item counts as not found.
 - **Any other error:** the store stays shut for the session and the coordinator shows
   "Clipboard history is locked"; nothing is deleted and nothing new is recorded.
 
 `ClipboardCipher` derives two keys from the root key with HKDF-SHA256: one for column values and one
 for blobs. A column value is AES-GCM with a random nonce and the field name plus row id as associated
-data, so a sealed `text` can't be moved into another row or into `source_app`. `meta` holds a canary
-sealed the same way; a file whose canary won't open under this key is refused and starts over.
-`kind`, `image_path`, `created_at` and `pinned_at` stay plain, because ordering, pruning and the two
+data, so a sealed `text` can't be moved into another row or into `source_app`. `image_path` is sealed
+to its row the same way, so pointing one row at another's blob makes the row unreadable rather than
+showing the wrong image; pruning and Clear History unseal it with the row's id. `meta` holds a canary
+sealed the same way; a file whose canary won't open under this key is refused and starts over, its
+blobs with it. `kind`, `created_at` and `pinned_at` stay plain, because ordering, pruning and the two
 load branches are SQL over them.
 
 **`SealedFile` is the blob format**, for images and their thumbnails: `TCSF`, a version byte and a
-7-byte random nonce prefix, then the plaintext in 64 KiB segments, each AES-GCM-sealed with its tag.
-A segment's nonce is the prefix, its big-endian index and a final-segment flag, and the file name is
+16-byte random salt, then the plaintext in 64 KiB segments, each AES-GCM-sealed with its tag. The
+salt derives a key for that one file (HKDF over the blob key), so no two files ever share a nonce;
+a segment's nonce is its big-endian index and a final-segment flag, and the header and file name are
 associated data, so a renamed, reordered, truncated or extended file fails to open, and a cut exactly
 on a segment boundary fails on the flag. `plaintextSize` follows from the file size alone, which is
 how the info pane states a size without unsealing. Writes go to a hidden `.partial` beside the target
@@ -241,7 +246,9 @@ and rename over it. `clipboard-cipher-test` holds the format to all of this.
 history never stays plaintext just because capture is off. It builds `clipboard.sqlite3.converting`
 with a rollback journal, sealing each row in `rowid` order and copying each image to a `.sealed` blob
 (Raycast's own files are copied, never touched), then removes the old file, renames the new one into
-place, and deletes the old PNGs and thumbnails. Every step can be repeated after a crash. A user who
+place, and deletes the old PNGs and thumbnails. An owned image that fails to seal stops the whole
+conversion, so its only copy is never deleted. Every step can be repeated after a crash, and
+leftover plaintext images keep it pending until a run removes them, capture on or off. A user who
 skips the release that carries it loses that history instead: the store refuses the old
 `user_version` and `load` deletes the unsealed files, so skipping it never leaves plaintext behind.
 
@@ -249,7 +256,10 @@ skips the release that carries it loses that history instead: the store refuses 
 APFS snapshots made before the conversion age out on their own schedule; FileVault is what protects
 the disk. The live pasteboard is plaintext to every app, as it is for every clipboard manager. A
 sealed value's length tells roughly how long a clip is. Anything able to approve a Keychain prompt as
-the user can read the key. A backup's staging tree in `Caches` holds plaintext while an export or
+the user can read the key, and a process already on the account before the store first exists could
+plant both a key and a store it opens; app-level encryption can't outlast an attacker who stays. A
+Keychain item another process created with an access list that refuses Tinycast can't be replaced,
+so it locks the history (a denial, never a disclosure). A backup's staging tree in `Caches` holds plaintext while an export or
 import runs; `AppCore.start` sweeps any a crash left.
 
 ## Search

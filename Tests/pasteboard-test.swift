@@ -430,6 +430,16 @@ struct PasteboardTests {
                 "removing one export takes its folder and no other")
             ClipboardExports.sweep(in: root)
             expect(!FileManager.default.fileExists(atPath: root.path), "the launch sweep takes every export")
+
+            // A copy belongs to the generation its image was written at; any other one retires it.
+            _ = try? ClipboardExports.write(bytes, in: root)
+            ClipboardExports.belong(toGeneration: 41)
+            ClipboardExports.discardPasteboardCopies(in: root, unlessGeneration: 41)
+            expect(FileManager.default.fileExists(atPath: root.path), "the image's own generation keeps it")
+            ClipboardExports.discardPasteboardCopies(in: root, unlessGeneration: 42)
+            expect(
+                !FileManager.default.fileExists(atPath: root.path),
+                "any later generation, ours or another app's, removes it")
         }
     }
 

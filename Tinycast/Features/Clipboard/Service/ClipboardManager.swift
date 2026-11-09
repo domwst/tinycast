@@ -46,6 +46,8 @@ final class ClipboardManager {
         sessionTokens = []
         stopPolling()
         owners.stop()
+        // With nothing polling, no later change could retire a copy left for a paste.
+        ClipboardExports.discardPasteboardCopies()
     }
 
     // Fast user switching: another session's clipboard isn't ours, so stop waking up for it.
@@ -148,9 +150,10 @@ final class ClipboardManager {
             return
         }
         lastChangeCount = generation
+        // Before the marker check: a marked write of ours retires an image's copy just the same.
+        ClipboardExports.discardPasteboardCopies(unlessGeneration: generation)
 
         if pb.types?.contains(Self.internalType) == true { return }
-        ClipboardExports.discardPasteboardCopies()
 
         // Never record secrets: skip copies tagged sensitive by any of the marker owners.
         if let types = pb.types, !Set(types).isDisjoint(with: Self.sensitiveTypes) { return }

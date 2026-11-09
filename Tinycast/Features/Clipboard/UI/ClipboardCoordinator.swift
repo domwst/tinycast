@@ -69,8 +69,9 @@ final class ClipboardCoordinator {
     /// A plaintext history from before encryption is sealed even while capture stays off.
     private func sealLegacyHistory() async {
         let database = clipboardStore.dbURL
+        let images = clipboardStore.imagesDir
         let pending = await Task.detached(priority: .utility) {
-            ClipboardEncryptionMigration.isPending(database: database)
+            ClipboardEncryptionMigration.isPending(database: database, images: images)
         }.value
         if pending { _ = await historyCipher() }
     }

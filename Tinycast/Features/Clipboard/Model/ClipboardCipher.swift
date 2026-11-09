@@ -7,6 +7,7 @@ struct ClipboardCipher: Sendable {
     enum Field: String, Sendable {
         case text
         case source
+        case imagePath
         case recognizedText
         case canary
     }

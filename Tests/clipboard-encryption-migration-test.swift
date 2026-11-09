@@ -33,6 +33,10 @@ struct ClipboardEncryptionMigrationTest {
         await resumesAfterACrash()
         leavesASealedStoreAlone()
         await skippingTheReleaseLeaksNothing()
+        aFailedSealKeepsTheOriginal()
+        cleanupResumesAfterTheSwap()
+        onlyTheRightKeyOpensTheStore()
+        imagesStayBoundToTheirRows()
 
         print(failures == 0 ? "\nALL PASSED" : "\n\(failures) FAILED")
         exit(failures == 0 ? 0 : 1)
@@ -163,10 +167,10 @@ struct ClipboardEncryptionMigrationTest {
             "the other app's original file is left alone",
             (try? Data(contentsOf: fixture.external)) == fixture.imageMarker
                 && FileManager.default.fileExists(atPath: rayRoot.path))
+        let thumbnails = fixture.images.appendingPathComponent(".thumbnails")
         check(
             "the plaintext thumbnails are gone",
-            !FileManager.default.fileExists(
-                atPath: fixture.images.appendingPathComponent(".thumbnails").path))
+            ((try? FileManager.default.contentsOfDirectory(atPath: thumbnails.path)) ?? []).isEmpty)
 
         let store = ClipboardStore(directory: root, cipher: cipher)
         store.load()
@@ -254,6 +258,94 @@ struct ClipboardEncryptionMigrationTest {
         check(
             "a missing store creates nothing",
             !FileManager.default.fileExists(atPath: root.appendingPathComponent("absent.sqlite3").path))
+    }
+
+    /// The only copy of an owned image must outlive a seal that fails, so nothing is converted.
+    static func aFailedSealKeepsTheOriginal() {
+        let root = scratch()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fixture = legacy(in: root)
+        let owned = (try? FileManager.default.contentsOfDirectory(atPath: fixture.images.path))?
+            .first { $0.hasSuffix(".png") }
+        guard let owned else { return check("the fixture has an owned image", false) }
+        // A folder where the sealed copy would go makes its rename fail.
+        let blocker = fixture.images.appendingPathComponent(ClipboardStore.sealedName(forOriginal: owned))
+        try? FileManager.default.createDirectory(at: blocker, withIntermediateDirectories: true)
+        ClipboardEncryptionMigration.run(database: fixture.database, images: fixture.images, cipher: cipher)
+        check(
+            "a failed seal leaves the old file unconverted",
+            !ClipboardEncryptionMigration.isSealedStore(fixture.database))
+        check(
+            "and the original image where it was",
+            FileManager.default.fileExists(atPath: fixture.images.appendingPathComponent(owned).path))
+        check(
+            "so the conversion is still pending",
+            ClipboardEncryptionMigration.isPending(database: fixture.database, images: fixture.images))
+    }
+
+    /// A crash after the swap leaves old images; the next run, capture on or off, removes them.
+    static func cleanupResumesAfterTheSwap() {
+        let root = scratch()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fixture = legacy(in: root)
+        ClipboardEncryptionMigration.run(database: fixture.database, images: fixture.images, cipher: cipher)
+        let stray = fixture.images.appendingPathComponent("\(UUID().uuidString).png")
+        try? fixture.imageMarker.write(to: stray)
+        let thumbnail = fixture.images.appendingPathComponent(".thumbnails/stray.png-256.png")
+        try? fixture.imageMarker.write(to: thumbnail)
+        check(
+            "leftover plaintext keeps the migration pending",
+            ClipboardEncryptionMigration.isPending(database: fixture.database, images: fixture.images))
+        ClipboardEncryptionMigration.run(database: fixture.database, images: fixture.images, cipher: cipher)
+        check(
+            "and the next run removes it, blob and thumbnail",
+            leaks(fixture.imageMarker, in: fixture.images).isEmpty)
+        check(
+            "after which nothing is pending",
+            !ClipboardEncryptionMigration.isPending(database: fixture.database, images: fixture.images))
+    }
+
+    /// A Keychain key is only trusted when a sealed store's canary opens under it.
+    static func onlyTheRightKeyOpensTheStore() {
+        let root = scratch()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let database = root.appendingPathComponent("clipboard.sqlite3")
+        check("no store vouches for any key", !ClipboardStore.opensSealedStore(at: database, cipher: cipher))
+        let store = ClipboardStore(directory: root, cipher: cipher)
+        store.addText("vouched", sourceBundleID: nil)
+        store.close()
+        check("the store's own key opens it", ClipboardStore.opensSealedStore(at: database, cipher: cipher))
+        let planted = ClipboardCipher(rootKey: SymmetricKey(size: .bits256))
+        check("a planted key does not", !ClipboardStore.opensSealedStore(at: database, cipher: planted))
+        let old = scratch()
+        defer { try? FileManager.default.removeItem(at: old) }
+        let fixture = legacy(in: old)
+        check(
+            "nor does a plaintext store, so a key found beside one is never adopted",
+            !ClipboardStore.opensSealedStore(at: fixture.database, cipher: cipher))
+    }
+
+    /// The image path is sealed to its row: pointing one row at another's blob makes it unreadable.
+    static func imagesStayBoundToTheirRows() {
+        let root = scratch()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fixture = legacy(in: root)
+        ClipboardEncryptionMigration.run(database: fixture.database, images: fixture.images, cipher: cipher)
+        var db: OpaquePointer?
+        sqlite3_open_v2(fixture.database.path, &db, SQLITE_OPEN_READWRITE, nil)
+        sqlite3_exec(
+            db,
+            """
+            UPDATE items SET image_path = (SELECT image_path FROM items WHERE kind = 'image'
+              ORDER BY rowid DESC LIMIT 1) WHERE rowid = (SELECT rowid FROM items
+              WHERE kind = 'image' ORDER BY rowid LIMIT 1)
+            """, nil, nil, nil)
+        sqlite3_close_v2(db)
+        let store = ClipboardStore(directory: root, cipher: cipher)
+        store.load()
+        check(
+            "a row pointed at another row's image no longer opens",
+            store.items.filter { $0.kind == .image }.count == 2)
     }
 
     /// A user who never ran the release opens the old file directly: history goes, plaintext too.

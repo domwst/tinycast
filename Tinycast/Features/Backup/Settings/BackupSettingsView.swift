@@ -22,6 +22,8 @@ struct BackupSettingsView: View {
     @State private var backupIsEncrypted = false
     @State private var backupPassphrase = ""
     @State private var openingBackup = false
+    /// Cleared by leaving the pane or choosing again, so a late decrypt discards its own tree.
+    @State private var openRequest: UUID?
     @State private var openedManifest: BackupManifest?
     /// Held between opening the file and applying it, so the extracted tree survives the picker.
     @State private var openedStaging: BackupStaging?
@@ -295,21 +297,22 @@ struct BackupSettingsView: View {
     }
 
     private func openBackup(_ url: URL, passphrase: String?) {
+        let request = UUID()
+        openRequest = request
         openingBackup = true
         importStatus = nil
         Task {
-            defer { openingBackup = false }
+            defer { if openRequest == request { openingBackup = false } }
             do {
                 let (staging, manifest) = try await BackupActions.openBackup(
                     at: url, passphrase: passphrase)
-                // A different file chosen while this one decrypted wins; this tree is stale.
-                guard backupFile == url else { return staging.discard() }
+                guard openRequest == request else { return staging.discard() }
                 openedStaging = staging
                 openedManifest = manifest
                 importSelection = manifest.categories
                 backupPassphrase = ""
             } catch {
-                importStatus = .failure(error.localizedDescription)
+                if openRequest == request { importStatus = .failure(error.localizedDescription) }
             }
         }
     }
@@ -334,6 +337,8 @@ struct BackupSettingsView: View {
 
     /// The extracted tree can run to gigabytes, so leaving the pane must not strand it.
     private func discardStagedBackup() {
+        openRequest = nil
+        openingBackup = false
         openedStaging?.discard()
         openedStaging = nil
         openedManifest = nil
