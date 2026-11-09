@@ -2,6 +2,8 @@ import Foundation
 
 enum ClipDragPayload: Equatable, Sendable {
     case file(URL)
+    /// A blob the store holds sealed, so the drag writes its plaintext only where it lands.
+    case sealedImage(URL)
     /// A browser reads `public.url`, a text field reads the string.
     case link(URL, String)
     case text(String)

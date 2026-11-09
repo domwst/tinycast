@@ -18,7 +18,8 @@ Current stable and beta only. Update (`brew upgrade --cask tinycast`) before rep
 Of particular interest:
 
 - **Accessibility (TCC)** — anything that widens what the paste grant enables.
-- **Clipboard history** — text and images cached on disk; unintended exposure or capture.
+- **Clipboard history** — sealed on disk with a Keychain key; any path that writes it in plaintext,
+  exposes the key, or records a copy an excluded app or a concealed marker should have kept out.
 - **Network** — Tinycast is offline by default and every networked feature is consent-gated. A path
   that reaches the network without consent, or survives consent being withdrawn, is high severity.
 - **Hotkeys** — the in-house hotkey stack and the Input Monitoring grant.

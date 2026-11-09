@@ -59,10 +59,15 @@ enum BackupActions {
         guard passphrase.count >= BackupArchive.minimumPassphraseLength else {
             throw BackupArchive.ArchiveError.passphraseTooShort
         }
+        var cipher: ClipboardCipher?
+        if categories.contains(.clipboard) {
+            cipher = await core.clipboardCoordinator.historyCipher()
+            guard cipher != nil else { throw ClipboardKeyStore.Failure.locked }
+        }
         guard let destination = chooseSaveLocation(named: "Tinycast", type: .tinycastBackup) else {
             throw CancellationError()
         }
-        let plan = BackupComposer.plan(categories, from: core)
+        let plan = BackupComposer.plan(categories, from: core, clipboardCipher: cipher)
         return try await Task.detached(priority: .userInitiated) {
             let staging = try BackupStaging()
             defer { staging.discard() }
@@ -147,9 +152,11 @@ enum BackupActions {
             }
         }
         let summary = result.backup.apply(to: core)
-        let imported =
-            result.clipboard.isEmpty
-            ? 0 : core.clipboardStore.importEntries(result.clipboard)
+        var imported = 0
+        if !result.clipboard.isEmpty, await core.clipboardCoordinator.openForWrite() {
+            imported = core.clipboardStore.importEntries(result.clipboard)
+            core.clipboardCoordinator.closeIfDisabled()
+        }
         return RaycastOutcome(
             summary: summary,
             clipboardImported: imported,

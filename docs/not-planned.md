@@ -89,16 +89,13 @@ launchers. We accept that to keep the app simple.
 
 ## Clipboard History
 
-- **Encryption.** History is not encrypted. It never leaves your Mac, and encryption would slow it
-  down. **Instead:** add sensitive apps to the block list. ([#993](https://github.com/abue-ammar/tinycast/issues/993))
 - **A large ⌘Y Quick Look preview.** The preview pane already shows the selected item. ([#1067](https://github.com/abue-ammar/tinycast/issues/1067), [#740](https://github.com/abue-ammar/tinycast/issues/740),
   [#1477](https://github.com/abue-ammar/tinycast/issues/1477))
-- **Open images in Preview.** **Instead:** use Show in Finder. ([#1328](https://github.com/abue-ammar/tinycast/issues/1328))
+- **Open images in Preview.** **Instead:** use Save Image…. ([#1328](https://github.com/abue-ammar/tinycast/issues/1328))
 - **Link previews or website icons.** ([#1330](https://github.com/abue-ammar/tinycast/issues/1330), [#747](https://github.com/abue-ammar/tinycast/issues/747))
 - **Keep a pasted item where it was.** A pasted item always moves to the top. ([#1577](https://github.com/abue-ammar/tinycast/issues/1577))
 - **Copy without closing Tinycast.** ([#1215](https://github.com/abue-ammar/tinycast/issues/1215))
 - **A global shortcut for paste as plain text.** It lives inside Clipboard History (⌃⌘↵). ([#1172](https://github.com/abue-ammar/tinycast/issues/1172))
-- **Fuzzy search.** ([#953](https://github.com/abue-ammar/tinycast/issues/953))
 - **Type "img" to filter.** **Instead:** press ⌘P to filter by type. ([#403](https://github.com/abue-ammar/tinycast/issues/403), [#1248](https://github.com/abue-ammar/tinycast/issues/1248))
 - **Merge duplicate entries.** ([#632](https://github.com/abue-ammar/tinycast/issues/632))
 - **Turn an entry into a snippet with ⌘S.** ([#1333](https://github.com/abue-ammar/tinycast/issues/1333))

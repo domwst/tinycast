@@ -306,6 +306,12 @@ enum RaycastTests {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("raycast-clipboard-test-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
+        // Raycast's own folder, outside the store: the import may read it but never move it.
+        let raycastImages = root.appendingPathComponent("Raycast", isDirectory: true)
+        let raycastImage = raycastImages.appendingPathComponent("retained.png")
+        let imageBytes = Data("raycast image bytes \(UUID().uuidString)".utf8)
+        try? FileManager.default.createDirectory(at: raycastImages, withIntermediateDirectories: true)
+        try? imageBytes.write(to: raycastImage)
         let imported = clipboardImport(
             [
                 clipboardEntry("later pin", createdAt: "2001-01-02T00:00:00Z", pinned: true),
@@ -319,14 +325,14 @@ enum RaycastTests {
                             "representations": [
                                 [
                                     "mimeType": "image/png", "contentType": "url",
-                                    "content": "/synthetic/retained.png"
+                                    "content": raycastImage.path
                                 ]
                             ]
                         ]
                     ]
                 ]
-            ], existingImages: ["/synthetic/retained.png"])
-        let store = ClipboardStore(directory: root)
+            ], existingImages: [raycastImage.path])
+        let store = ClipboardStore(directory: root, cipher: .harness)
         expect(
             store.maxAge == ClipboardRetention.threeMonths.maxAge,
             "the default retention remains three months")
@@ -339,8 +345,27 @@ enum RaycastTests {
         store.enforceLimits()
         expect(
             store.items.filter(\.isPinned).count == 3, "subsequent retention also keeps text and image pins")
+        let adopted = store.items.first { $0.kind == .image }
+        expect(
+            adopted?.imagePath?.hasPrefix(store.imagesDir.path + "/") == true
+                && adopted?.imagePath?.hasSuffix(
+                    "/" + ClipboardStore.sealedName(forOriginal: raycastImage.path)) == true,
+            "a Raycast image is copied into the store's own images folder, sealed")
+        expect(
+            adopted.map { store.ownsImage(of: $0) } == true,
+            "the adopted copy is the store's to prune and derive from")
+        expect(
+            adopted?.imagePath.map { SealedFile.isSealed(URL(fileURLWithPath: $0)) } == true,
+            "the adopted copy is written in the sealed format")
+        expect(
+            adopted?.imagePath.flatMap { FileManager.default.contents(atPath: $0) }
+                .map { $0.range(of: imageBytes) == nil } == true,
+            "the adopted copy holds none of the Raycast image's plaintext")
+        expect(
+            FileManager.default.contents(atPath: raycastImage.path) == imageBytes,
+            "the Raycast original is left where it was, byte for byte")
         store.close()
-        let reopened = ClipboardStore(directory: root)
+        let reopened = ClipboardStore(directory: root, cipher: .harness)
         reopened.load()
         expect(
             reopened.search("", filter: .all).compactMap(\.text) == [
@@ -350,9 +375,22 @@ enum RaycastTests {
         expect(
             reopened.items.filter(\.isPinned).allSatisfy { $0.pinnedAt == $0.createdAt },
             "the original pin metadata is persisted, not just held in the import array")
+        let reloaded = reopened.items.first { $0.kind == .image }
         expect(
-            reopened.items.contains { $0.isPinned && $0.imagePath == "/synthetic/retained.png" },
-            "an old pinned image survives import-time retention and reload too")
+            reloaded?.isPinned == true && reloaded?.imagePath == adopted?.imagePath,
+            "an old pinned image survives import-time retention and reload as the sealed copy")
+        expect(
+            reloaded.flatMap { reopened.imageData(for: $0) } == imageBytes,
+            "the sealed copy opens to the Raycast image's bytes")
+        expect(
+            reopened.importEntries(imported.items.filter { $0.kind == .image }) == 0,
+            "importing the same Raycast image again adds no row")
+        let sealedCopies =
+            (try? FileManager.default.contentsOfDirectory(atPath: reopened.imagesDir.path))?
+            .filter { $0.hasSuffix(".\(SealedFile.fileExtension)") } ?? []
+        expect(
+            sealedCopies == [ClipboardStore.sealedName(forOriginal: raycastImage.path)],
+            "nor a second sealed copy")
     }
 
     // MARK: - Zlib
@@ -390,4 +428,8 @@ enum RaycastTests {
             (try? Zlib.gunzip(gzipped, maxOutput: 512 * 1024 * 1024))?.count == oversized.count,
             "the same payload inflates under the 512 MB payload cap")
     }
+}
+
+extension ClipboardCipher {
+    static let harness = ClipboardCipher(rootKey: SymmetricKey(size: .bits256))
 }

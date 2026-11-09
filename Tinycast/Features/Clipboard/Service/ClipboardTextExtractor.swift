@@ -22,13 +22,26 @@ nonisolated enum ClipboardTextExtractor {
             size <= maximumFileBytes
         else { return "" }
         if isPDF { return try await extractPDF(url) }
-        guard let image = autoreleasepool(invoking: { image(at: url) }) else { throw Failure.unreadable }
+        let image = autoreleasepool {
+            CGImageSourceCreateWithURL(url as CFURL, nil).flatMap(recognizable(from:))
+        }
+        guard let image else { throw Failure.unreadable }
         return bounded(try await recognize(image))
     }
 
-    private static func image(at url: URL) -> CGImage? {
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-            let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+    /// A sealed blob's plaintext, handed over a pipe so it never touches the disk unsealed.
+    static func extract(imageData data: Data) async throws -> String {
+        try Task.checkCancellation()
+        guard data.count <= maximumFileBytes else { return "" }
+        let image = autoreleasepool {
+            CGImageSourceCreateWithData(data as CFData, nil).flatMap(recognizable(from:))
+        }
+        guard let image else { throw Failure.unreadable }
+        return bounded(try await recognize(image))
+    }
+
+    private static func recognizable(from source: CGImageSource) -> CGImage? {
+        guard let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
             let width = properties[kCGImagePropertyPixelWidth] as? Double,
             let height = properties[kCGImagePropertyPixelHeight] as? Double,
             width.isFinite, height.isFinite, width > 0, height > 0

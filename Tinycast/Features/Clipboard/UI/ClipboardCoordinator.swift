@@ -14,6 +14,8 @@ final class ClipboardCoordinator {
     /// One Copy Text at a time: a newer trigger cancels the helper an older one is waiting on.
     private var textTask: Task<Void, Never>?
     private var pasteSequence: PasteSequence?
+    /// One Keychain read at a time; every opener waits on the same answer.
+    private var unlocking: Task<ClipboardCipher?, Never>?
 
     init(
         clipboardStore: ClipboardStore,
@@ -43,14 +45,69 @@ final class ClipboardCoordinator {
             clipboardManager.stop()
             if palette.mode == .clipboard { palette.prepare(mode: .launcher) }
             clipboardStore.close()
+            Task { await sealLegacyHistory() }
             return
         }
-        clipboardStore.open()
+        Task { await openHistory() }
+    }
+
+    /// The key lives in the Keychain, read off-main, so the history opens a moment after launch.
+    private func openHistory() async {
+        guard let cipher = await historyCipher() else { return reportLocked() }
+        guard settings.clipboardEnabled, !clipboardStore.isOpen else { return }
+        clipboardStore.open(cipher: cipher)
         clipboardStore.maxAge = settings.clipboardRetention.maxAge
+        clipboardStore.onSearchResultsChanged = { [weak self] query, previous, current in
+            self?.followSearchResults(query: query, previous: previous, current: current)
+        }
+        clipboardStore.load()
+        // Capture starts last: a copy recorded into a store not yet open would be lost.
         clipboardManager.start()
         core.applyClipboardTextSearch()
-        // Deferred off the launch path: the palette fills in behind the SQLite read and prune.
-        Task { clipboardStore.load() }
+    }
+
+    /// A plaintext history from before encryption is sealed even while capture stays off.
+    private func sealLegacyHistory() async {
+        let database = clipboardStore.dbURL
+        let pending = await Task.detached(priority: .utility) {
+            ClipboardEncryptionMigration.isPending(database: database)
+        }.value
+        if pending { _ = await historyCipher() }
+    }
+
+    /// The store's own key once opened, otherwise one Keychain read (and conversion) off-main.
+    func historyCipher() async -> ClipboardCipher? {
+        if let cipher = clipboardStore.cipher { return cipher }
+        if let unlocking { return await unlocking.value }
+        let database = clipboardStore.dbURL
+        let images = clipboardStore.imagesDir
+        let task = Task.detached(priority: .userInitiated) { () -> ClipboardCipher? in
+            guard case .ready(let cipher) = ClipboardKeyStore.unlock(database: database, images: images)
+            else { return nil }
+            return cipher
+        }
+        unlocking = task
+        let cipher = await task.value
+        unlocking = nil
+        return cipher
+    }
+
+    /// For a one-off write with the feature off, as Clear History and an import make.
+    func openForWrite() async -> Bool {
+        guard let cipher = await historyCipher() else {
+            reportLocked()
+            return false
+        }
+        clipboardStore.open(cipher: cipher)
+        return clipboardStore.isOpen
+    }
+
+    func closeIfDisabled() {
+        if !settings.clipboardEnabled { clipboardStore.close() }
+    }
+
+    private func reportLocked() {
+        core.showMessage(ClipboardKeyStore.Failure.locked.localizedDescription, tone: .danger)
     }
 
     func followSearchResults(query: String, previous: [ClipboardItem], current: [ClipboardItem]) {
@@ -164,9 +221,11 @@ final class ClipboardCoordinator {
 
     /// Reachable with the feature off, so what was kept before can still be erased afterwards.
     func clearHistory() {
-        clipboardStore.open()
-        clipboardStore.clearAll()
-        if !settings.clipboardEnabled { clipboardStore.close() }
+        Task {
+            guard await openForWrite() else { return }
+            clipboardStore.clearAll()
+            closeIfDisabled()
+        }
     }
 
     func copyToClipboard(_ item: ClipboardItem) {
@@ -184,17 +243,35 @@ final class ClipboardCoordinator {
         Paster.copyPlainText(format.string(for: color))
     }
 
+    /// A sealed image has no file worth revealing, so ⌘F saves a copy of it instead.
     func revealClip(_ item: ClipboardItem) {
         guard let url = clipURL(for: item) else { return }
         paletteCoordinator.hidePalette(restoreFocus: false)
-        AppLauncher.showInFinder(url)
+        guard clipboardStore.ownsImage(of: item) else { return AppLauncher.showInFinder(url) }
+        saveImage(item)
+    }
+
+    private func saveImage(_ item: ClipboardItem) {
+        guard let data = clipboardStore.imageData(for: item) else { return reportUnavailable(item) }
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.png]
+        panel.nameFieldStringValue = ClipboardExports.imageName
+        panel.canCreateDirectories = true
+        NSApp.activate(ignoringOtherApps: true)
+        guard panel.runModal() == .OK, let destination = panel.url else { return }
+        do {
+            try data.write(to: destination, options: .atomic)
+        } catch {
+            core.showMessage(String(localized: "Couldn’t save the image"), tone: .danger)
+        }
     }
 
     /// Nil only for a vanished file, which the HUD reports rather than hand over a dead path.
     func dragPayload(for item: ClipboardItem) -> ClipDragPayload? {
         let payload = item.dragPayload
         guard case .file = payload else { return payload }
-        return clipURL(for: item).map(ClipDragPayload.file)
+        guard let url = clipURL(for: item) else { return nil }
+        return clipboardStore.ownsImage(of: item) ? .sealedImage(url) : .file(url)
     }
 
     func openClip(_ item: ClipboardItem) {
@@ -228,7 +305,8 @@ final class ClipboardCoordinator {
                         : core.showMessage(
                             String(localized: "That image is no longer available."), tone: .danger)
                 }
-                let text = try await ClipboardTextWorker.extract(item)
+                let text = try await ClipboardTextWorker.extract(
+                    item, imageKey: clipboardStore.imageKey(for: item))
                 guard !text.isEmpty else {
                     return core.showMessage(String(localized: "No text found"), tone: .neutral)
                 }

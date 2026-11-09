@@ -1,8 +1,11 @@
 import CoreText
+import CryptoKit
 import Foundation
 import ImageIO
 import SQLite3
 import PDFKit
+
+private let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
 @main
 @MainActor
@@ -15,6 +18,7 @@ struct ClipboardTextTests {
             .appendingPathComponent("tinycast-ocr-test-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
+        let helper = Task.detached { buildHelper(in: directory) }
         let imageURL = directory.appendingPathComponent("scan.png")
         let image = makeImage()
         let destination = CGImageDestinationCreateWithURL(
@@ -98,12 +102,16 @@ struct ClipboardTextTests {
         try await searchAndLifetime(in: directory)
         try await scheduling(in: directory)
         try await retryFailures(in: directory)
+        try await sealedImagesAreReadOverStdin(in: directory, helper: await helper.value)
+        // Flushed first: while the helper's stdin can raise SIGPIPE, the last case kills the harness.
+        fflush(stdout)
+        await helperThatReadsNothingFailsOnlyTheExtraction(in: directory)
         print("\(passes)/\(passes + failures) passed")
         if failures > 0 { exit(1) }
     }
 
     static func searchAndLifetime(in directory: URL) async throws {
-        let store = ClipboardStore(directory: directory.appendingPathComponent("search"))
+        let store = ClipboardStore(directory: directory.appendingPathComponent("search"), cipher: .harness)
         store.maxAge = ClipboardRetention.forever.maxAge
         store.addFiles(["/tmp/invoice.pdf"], sourceBundleID: nil)
         let original = store.items[0]
@@ -143,7 +151,7 @@ struct ClipboardTextTests {
         store.addText("new while off", sourceBundleID: nil)
         store.promote(store.items.first { $0.id == original.id }!)
         store.close()
-        store.open()
+        store.open(cipher: .harness)
         store.load()
         expect(!store.textSearchEnabled, "reopen does not opt in")
         expect(store.nextExtractionItem() == nil, "reopen does not initialize worker")
@@ -155,8 +163,10 @@ struct ClipboardTextTests {
         expect(
             !store.setExtractedText("late", for: original, generation: store.extractionGeneration),
             "deleted entry cannot be resurrected")
+        let oldImage = directory.appendingPathComponent("old.png")
+        writePNG(makeImage(), to: oldImage)
         let old = ClipboardItem(
-            imagePath: "/tmp/old.png",
+            imagePath: oldImage.path,
             createdAt: Date().addingTimeInterval(-86_400 * 7), sourceBundleID: nil)
         store.importEntries([old] + (0..<1005).map { ClipboardItem(text: "new \($0)", sourceBundleID: nil) })
         expect(!store.items.contains { $0.id == old.id }, "fixture is beyond resident window")
@@ -176,6 +186,127 @@ struct ClipboardTextTests {
         expect(store.search("archive", filter: .image).isEmpty, "clear discards late search")
     }
 
+    /// An owned image is sealed on disk, so the helper only ever sees its plaintext on stdin.
+    static func sealedImagesAreReadOverStdin(in directory: URL, helper: URL?) async throws {
+        let scan = directory.appendingPathComponent("sealed-scan.png")
+        writePNG(makeImage(), to: scan)
+        let blank = directory.appendingPathComponent("sealed-blank.png")
+        writePNG(makeCanvas(width: 1000, height: 300).makeImage()!, to: blank)
+        let scanData = try Data(contentsOf: scan)
+        let direct = try await Task.detached {
+            try await ClipboardTextExtractor.extract(imageData: scanData)
+        }.value
+        expect(direct.contains("ALPINE RECEIPT 7391"), "image bytes are recognized without a file")
+        do {
+            _ = try await Task.detached {
+                try await ClipboardTextExtractor.extract(imageData: Data("not an image".utf8))
+            }.value
+            expect(false, "bytes that are not an image throw")
+        } catch { expect(true, "bytes that are not an image throw") }
+
+        let store = ClipboardStore(directory: directory.appendingPathComponent("sealed"), cipher: .harness)
+        defer { store.close() }
+        store.importEntries([
+            ClipboardItem(imagePath: scan.path, sourceBundleID: nil),
+            ClipboardItem(imagePath: blank.path, sourceBundleID: nil)
+        ])
+        guard let text = store.items.first(where: { $0.imagePath?.hasSuffix("/sealed-scan.png.sealed") == true }),
+            let empty = store.items.first(where: { $0.imagePath?.hasSuffix("/sealed-blank.png.sealed") == true }),
+            let key = store.imageKey(for: text), let path = text.imagePath
+        else { return expect(false, "both images are sealed into the store") }
+        let sealed = URL(fileURLWithPath: path)
+        expect(SealedFile.isSealed(sealed), "the owned image is sealed on disk")
+        expect(
+            CGImageSourceCreateWithURL(sealed as CFURL, nil)
+                .flatMap { CGImageSourceCreateImageAtIndex($0, 0, nil) } == nil,
+            "and its blob does not decode as an image")
+        guard let helper else { return expect(false, "the real helper builds from the shipped sources") }
+
+        let read = try await ClipboardTextWorker.extract(sealedImage: sealed, key: key, executable: helper)
+        expect(read.contains("ALPINE RECEIPT 7391"), "the helper recognizes a sealed image over stdin")
+        do {
+            _ = try await ClipboardTextWorker.extract(at: sealed, isPDF: false, executable: helper)
+            expect(false, "the helper cannot read a sealed blob by its path")
+        } catch { expect(true, "the helper cannot read a sealed blob by its path") }
+        do {
+            _ = try await ClipboardTextWorker.extract(
+                sealedImage: sealed, key: SymmetricKey(size: .bits256), executable: helper)
+            expect(false, "a wrong key hands the helper nothing to recognize")
+        } catch { expect(true, "a wrong key hands the helper nothing to recognize") }
+
+        expect(store.setTextSearchEnabled(true), "enable extraction for the sealed images")
+        let indexer = ClipboardTextIndexer(
+            store: store, delay: .milliseconds(10), canRun: { true },
+            extract: { item in
+                try await ClipboardTextWorker.extract(
+                    sealedImage: URL(fileURLWithPath: item.imagePath ?? ""), key: key, executable: helper)
+            })
+        indexer.start()
+        try await waitUntil { store.nextExtractionItem() == nil }
+        indexer.stop()
+        await indexer.waitUntilStopped()
+        expect(store.nextExtractionRetry == nil, "both sealed images are read without a failure")
+        expect(recognizedText(of: empty, in: store.dbURL) == .none, "an image with no text stores NULL")
+        guard case .sealed(let blob) = recognizedText(of: text, in: store.dbURL) else {
+            return expect(false, "the recognized text is stored")
+        }
+        expect(blob.range(of: Data("7391".utf8)) == nil, "and is sealed, not plaintext, on disk")
+        _ = store.search("7391", filter: .image)
+        await store.searchSettled()
+        expect(
+            store.search("7391", filter: .image).map(\.id) == [text.id],
+            "the sealed recognized text finds its image")
+    }
+
+    /// Past the pipe buffer, so the write is still in flight when the helper has already gone.
+    static func helperThatReadsNothingFailsOnlyTheExtraction(in directory: URL) async {
+        let key = ClipboardCipher.harness.blobKey
+        let url = directory.appendingPathComponent("large.sealed")
+        try? SealedFile.write(Data(count: 4_000_000), to: url, key: key)
+        let quitter = directory.appendingPathComponent("quitter.sh")
+        try? "#!/bin/sh\nexit 1\n".write(to: quitter, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: quitter.path)
+        do {
+            _ = try await ClipboardTextWorker.extract(sealedImage: url, key: key, executable: quitter)
+            expect(false, "a helper that exits without reading fails the extraction, not the app")
+        } catch { expect(true, "a helper that exits without reading fails the extraction, not the app") }
+    }
+
+    enum RecognizedText: Equatable {
+        case missing, none
+        case sealed(Data)
+    }
+
+    static func recognizedText(of item: ClipboardItem, in url: URL) -> RecognizedText {
+        var db: OpaquePointer?
+        precondition(sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK)
+        defer { sqlite3_close_v2(db) }
+        var statement: OpaquePointer?
+        sqlite3_prepare_v2(db, "SELECT text FROM item_text WHERE item_id = ?1", -1, &statement, nil)
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_text(statement, 1, item.id.uuidString, -1, transient)
+        guard sqlite3_step(statement) == SQLITE_ROW else { return .missing }
+        guard sqlite3_column_type(statement, 0) != SQLITE_NULL, let bytes = sqlite3_column_blob(statement, 0)
+        else { return .none }
+        return .sealed(Data(bytes: bytes, count: Int(sqlite3_column_bytes(statement, 0))))
+    }
+
+    /// Built from the shipped sources, so the stdin contract checked is the one that ships.
+    nonisolated static func buildHelper(in directory: URL) -> URL? {
+        let output = directory.appendingPathComponent("ClipboardTextHelper")
+        let service = "Tinycast/Features/Clipboard/Service/"
+        let compile = Process()
+        compile.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
+        compile.arguments = [
+            "swiftc", "-swift-version", "6", "-parse-as-library",
+            service + "ClipboardTextExtractor.swift", service + "ClipboardTextHelper.swift",
+            "-o", output.path
+        ]
+        guard (try? compile.run()) != nil else { return nil }
+        compile.waitUntilExit()
+        return compile.terminationStatus == 0 ? output : nil
+    }
+
     static func hasExtractionTable(_ url: URL) -> Bool {
         var db: OpaquePointer?
         precondition(sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK)
@@ -187,7 +318,7 @@ struct ClipboardTextTests {
     }
 
     static func scheduling(in directory: URL) async throws {
-        let store = ClipboardStore(directory: directory.appendingPathComponent("store"))
+        let store = ClipboardStore(directory: directory.appendingPathComponent("store"), cipher: .harness)
         expect(store.setTextSearchEnabled(true), "enable extraction for scheduling fixture")
         var idle = false
         var calls = 0
@@ -231,7 +362,7 @@ struct ClipboardTextTests {
 
     static func retryFailures(in directory: URL) async throws {
         enum Failure: Error { case temporary }
-        let store = ClipboardStore(directory: directory.appendingPathComponent("failures"))
+        let store = ClipboardStore(directory: directory.appendingPathComponent("failures"), cipher: .harness)
         store.setTextSearchEnabled(true)
         store.addFiles(["/tmp/failure.pdf"], sourceBundleID: nil)
         let failed = store.items[0]
@@ -291,6 +422,7 @@ struct ClipboardTextTests {
         let empty = store.items[0]
         store.setExtractedText("", for: empty, generation: store.extractionGeneration)
         expect(store.nextExtractionItem() == nil, "empty successful recognition does not loop")
+        expect(recognizedText(of: empty, in: store.dbURL) == .none, "no text found is stored as NULL")
         store.setTextSearchEnabled(false)
         store.setTextSearchEnabled(true)
         expect(store.nextExtractionItem()?.id == empty.id, "reenabling retries earlier empty attempts")
@@ -367,4 +499,8 @@ struct ClipboardTextTests {
             print("FAIL: \(message)")
         }
     }
+}
+
+extension ClipboardCipher {
+    static let harness = ClipboardCipher(rootKey: SymmetricKey(size: .bits256))
 }

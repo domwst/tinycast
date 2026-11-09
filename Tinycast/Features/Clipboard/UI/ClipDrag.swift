@@ -1,12 +1,19 @@
 import AppKit
+import CryptoKit
 
 extension ClipDragPayload {
     /// The row tile is already cached at this size, so the preview costs no decode.
     private static let previewPixel: CGFloat = 64
 
     /// A link writes two types from one item, so the receiver takes whichever it reads.
-    var dragItem: RowDragItem {
+    func dragItem(imageKey: SymmetricKey?) -> RowDragItem? {
         switch self {
+        case .sealedImage(let url):
+            guard let imageKey else { return nil }
+            return RowDragItem(
+                writer: ClipboardImageFilePromise.provider(for: url, key: imageKey),
+                image: ImageThumbnail.cached(url, maxPixel: Self.previewPixel)
+                    ?? NSWorkspace.shared.icon(for: .png))
         case .file(let url):
             let tile =
                 ImageThumbnail.cached(url, maxPixel: Self.previewPixel)

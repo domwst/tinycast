@@ -134,7 +134,9 @@ struct ClipboardScreen: PaletteScreen {
         // Empty history: centre one message across the panel, not in the list column.
         if rows.isEmpty {
             // Names the filter, so one hiding every entry doesn't read as an empty history.
-            EmptyResults(text: vm.clipboardFilter.emptyMessage)
+            EmptyResults(
+                text: store.isSearching
+                    ? String(localized: "Searching…") : vm.clipboardFilter.emptyMessage)
         } else {
             let selected = item(at: selection)
             HStack(spacing: 0) {
@@ -219,9 +221,11 @@ enum ClipboardActionsMenu {
                 })
         }
         if item.kind != .text {
+            let saves = store.ownsImage(of: item)
             items.append(
                 PopoverMenuItem(
-                    title: String(localized: "Show in Finder"), systemImage: "folder", shortcut: "⌘F"
+                    title: saves ? String(localized: "Save Image…") : String(localized: "Show in Finder"),
+                    systemImage: saves ? "square.and.arrow.down" : "folder", shortcut: "⌘F"
                 ) {
                     core.clipboardCoordinator.revealClip(item)
                 })

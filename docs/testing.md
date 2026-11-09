@@ -128,6 +128,8 @@ If a change touches anything in the right column, the harness on the left is man
 | `clipboard-coordinator-test` | Edit Entry selection across query/type changes and pins, failed writes, deletion during editing and cancellation; isolated database and recorded clipboard effects |
 | `clipboard-thumbnail-test` | `Platform/Images/ImageThumbnail.swift` copies against the real store — a remove or clear mid-copy leaves none, same-named JPEG/PNG copies stay apart, a timeout or cancel frees the queue, and a failed or unreadable copy falls back to the original; a stand-in script plays the helper |
 | `pasteboard-test` | `Clipboard/Service/ClipboardManager.swift` capture and `Paster.write` — what a Finder copy reads as, and what a file or image entry writes back |
+| `clipboard-cipher-test` | `Platform/SealedFile.swift` and `Clipboard/Model/ClipboardCipher.swift` — segment boundaries, implied sizes, a wrong key, a renamed, cut, extended, flipped or reordered file, 0600 permissions, no plaintext in the bytes, and a sealed value bound to its field and row |
+| `clipboard-encryption-migration-test` | `Migrations/ClipboardEncryptionMigration.swift` against the real store — a v1 plaintext history with FTS, PNGs, thumbnails, a Raycast reference and recognized text converts with order, pins and sources intact and no marker left on disk; a crash at either swap point resumes; a skipped release leaves nothing in plaintext |
 | `clipboard-source-test` | `Clipboard/Model/ClipboardSource.swift`, `Platform/PasteboardOwnerMonitor.swift`, `TypingFocus.swift`, `ProcessExecutable.swift` — enclosing-app chains, every witness blocking, the recorded app, the `pboard` line parser, and a live `log stream` naming the harness as writer of its own named pasteboard (skipped where `log stream` is refused) |
 | `emoji-test` | `Emoji/Model/EmojiCatalog.swift`, `EmojiGridGeometry.swift`, the generated data and keyword packs |
 | `emoji-search-test` | `Emoji/Service/EmojiIndex.swift`, `FrequentEmojiStore.swift`, `Scripts/gen-emoji.js`'s keyword format, multilingual search |
@@ -319,9 +321,12 @@ the attachment path against the bounded reader it now delegates to. Compare thre
 per build with identical `-O` settings:
 
 ```sh
-swiftc -O -swift-version 6 Tinycast/Platform/PasteboardFiles.swift \
-    Tinycast/Features/Clipboard/Model/{ClipboardStore,ClipboardFilter,ClipboardFileKind,ColorValue,ColorFormat,ColorSpaces}.swift \
-    Tinycast/Features/Clipboard/Service/ClipboardManager.swift \
+swiftc -O -swift-version 6 Tinycast/Platform/{PasteboardFiles,SealedFile,AppPaths}.swift \
+    Tinycast/Platform/{PasteboardOwnerMonitor,ProcessExecutable,TypingFocus}.swift \
+    Tinycast/Platform/Images/ImageDerivative.swift \
+    Tinycast/Features/Clipboard/Model/{ClipboardStore,ClipboardCipher,ClipboardQuery,ClipboardSource}.swift \
+    Tinycast/Features/Clipboard/Model/{ClipboardFilter,ClipboardFileKind,ColorValue,ColorFormat,ColorSpaces}.swift \
+    Tinycast/Features/Clipboard/Service/{ClipboardManager,ClipboardExports}.swift \
     Tests/clipboard-file-performance.swift -o /tmp/clipboard-file-performance
 /tmp/clipboard-file-performance
 ```
@@ -330,7 +335,8 @@ swiftc -O -swift-version 6 Tinycast/Platform/PasteboardFiles.swift \
 as Clipboard History does, and prints the times with the footprint and its peak as JSON. `--fixtures`
 writes 10 seeded synthetic Display P3 screenshots up to 3456 × 2234, so no real clipboard is needed.
 `--original` decodes the blobs as before the copies existed; `--copies` makes and reads the
-`ImageDerivative` copies, so its first run measures a first view and later runs every other one. The
+`ImageDerivative` copies, so its first run measures a first view and later runs every other one.
+Fixtures and copies are sealed under a fixed benchmark key, as the store seals them. The
 helper must sit at `Contents/Helpers` beside the benchmark:
 
 ```sh
@@ -338,7 +344,7 @@ D=/tmp/clipboard-thumbnail-performance; mkdir -p $D/Contents/Helpers
 swiftc -O -swift-version 6 -parse-as-library \
     Tinycast/Features/Clipboard/Service/{ClipboardTextExtractor,ClipboardTextHelper}.swift \
     -o $D/Contents/Helpers/ClipboardTextHelper
-swiftc -O -swift-version 6 Tinycast/Platform/ProcessExit.swift \
+swiftc -O -swift-version 6 Tinycast/Platform/{ProcessExit,SealedFile}.swift \
     Tinycast/Platform/Images/{ImageThumbnail,ImageDerivative,ThumbnailCache}.swift \
     Tests/clipboard-thumbnail-performance.swift -o $D/clipboard-thumbnail-performance
 $D/clipboard-thumbnail-performance /tmp/ctp --fixtures
@@ -502,7 +508,17 @@ caches, TCC grants and login item, so this cannot disturb an installed copy.
 ### Clipboard
 
 - A copy appears at the top within about a second; an image copy records a thumbnail
-- Search is correct both under and over three characters
+- Search is correct both under and over three characters; `two words` matches them in either order,
+  `pasword` finds "password", and an older-than-window match appears after a brief "Searching…"
+- After capturing a marker text and a screenshot, `grep -rl <marker>` over
+  `~/Library/Application Support/com.tinycast.app.dev/` finds nothing, and `strings` on the store
+  shows no clip text; the images folder holds only `.sealed` files
+- Launch a build with a plaintext history from before this change: it converts on first launch,
+  with the feature on or off, and keeps every entry, pin and image
+- Paste an image into TextEdit (the picture) and into Terminal (a path that opens it); copying
+  something else removes that exported copy. Drag an image to the Desktop, and ⌘F saves one
+- Delete the `com.tinycast.app.dev.clipboard-key` item in Keychain Access and relaunch: history
+  starts empty, and no old sealed blob is left in `images/`
 - The type filter searches from its top band, retains its active checkmark when matched, and shows
   centred **No Results** without changing the clipboard query; its native field supports selection
 - ⌘. pins and the highlight follows the row into Pinned; ⌘⌫ deletes; ⌘↵ copies without pasting

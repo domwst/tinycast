@@ -2,6 +2,7 @@
 // Every case drives `NSPasteboard.withUniqueName()`: writing to `.general` would land in the
 // reader's own running Tinycast as a genuine copy.
 import AppKit
+import CryptoKit
 
 @main
 @MainActor
@@ -9,8 +10,12 @@ struct PasteboardTests {
     static var failures = 0
     static var passes = 0
     static let cap = ClipboardManager.maxCapturedFiles
+    /// `Paster.write` exports into `AppPaths.caches()` with no seam, so Caches must live here.
+    static let home = FileManager.default.temporaryDirectory
+        .appendingPathComponent("tinycast-pasteboard-home-\(UUID().uuidString)", isDirectory: true)
 
     static func main() {
+        setenv("CFFIXED_USER_HOME", home.path, 1)
         finderCopyReadsAsAFileNotItsName()
         everyFileFlavourIsRead()
         multipleFilesReadNewestLast()
@@ -23,8 +28,10 @@ struct PasteboardTests {
         richTextWithoutPlainTextReadsAsText()
         fileEntriesWriteBackAsFiles()
         aVanishedFileWritesNothing()
-        imageEntriesWriteBackWithTheirFile()
+        imageEntriesWriteBackAsPNGAndAnExportedFile()
+        exportsAreOwnerOnlyAndSwept()
 
+        try? FileManager.default.removeItem(at: home)
         print("\(passes)/\(passes + failures) passed")
         if failures > 0 { exit(1) }
     }
@@ -305,7 +312,7 @@ struct PasteboardTests {
         withScratch { dir in
             let file = dir.appendingPathComponent("report.pdf")
             try? Data("pdf".utf8).write(to: file)
-            let store = ClipboardStore(directory: dir.appendingPathComponent("store"))
+            let store = ClipboardStore(directory: dir.appendingPathComponent("store"), cipher: .harness)
             store.addFiles([file.path], sourceBundleID: nil)
             let pb = board()
 
@@ -321,7 +328,7 @@ struct PasteboardTests {
 
     static func aVanishedFileWritesNothing() {
         withScratch { dir in
-            let store = ClipboardStore(directory: dir.appendingPathComponent("store"))
+            let store = ClipboardStore(directory: dir.appendingPathComponent("store"), cipher: .harness)
             store.addFiles(["/nowhere/\(UUID().uuidString).txt"], sourceBundleID: nil)
             let pb = board()
             pb.declareTypes([.string], owner: nil)
@@ -332,27 +339,102 @@ struct PasteboardTests {
         }
     }
 
-    /// A text-only receiver ignores image data, so the stored file goes out beside it.
-    static func imageEntriesWriteBackWithTheirFile() {
+    /// The blob stays sealed: a receiver that asks for a file is handed an unsealed export.
+    static func imageEntriesWriteBackAsPNGAndAnExportedFile() {
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        guard caches.path.hasPrefix(home.path + "/") else {
+            return fail("Caches is not redirected to the harness's home, so no export is written")
+        }
         withScratch { dir in
             let image = dir.appendingPathComponent("shot.png")
-            let bytes = Data("png".utf8)
+            let bytes = Data("png bytes of the captured image".utf8)
             try? bytes.write(to: image)
-            let store = ClipboardStore(directory: dir.appendingPathComponent("store"))
+            let store = ClipboardStore(directory: dir.appendingPathComponent("store"), cipher: .harness)
             store.importEntries([ClipboardItem(imagePath: image.path, sourceBundleID: nil)])
+            guard let item = store.items.first, let blob = store.imageURL(for: item) else {
+                return fail("the image is sealed into the store")
+            }
+            expect(SealedFile.isSealed(blob), "the stored blob is sealed")
+            expect(
+                (try? Data(contentsOf: blob))?.range(of: bytes) == nil, "and holds none of the image's bytes")
+            let exports = ClipboardExports.directory
+            let exportsBefore = (try? FileManager.default.contentsOfDirectory(atPath: exports.path)) ?? []
             let pb = board()
+            defer { pb.releaseGlobally() }
 
-            expect(Paster.write(store.items[0], store: store, to: pb), "a present image writes")
-            expect(pb.data(forType: .png) == bytes, "as its image data")
-            let read = pb.readObjects(forClasses: [NSURL.self]) as? [URL]
-            expect(read?.first?.path == image.path, "and as its stored file")
+            expect(Paster.write(item, store: store, to: pb), "a present image writes")
+            expect(pb.data(forType: .png) == bytes, "as the captured image's bytes")
+            expect(pb.types?.contains(.fileURL) == true, "offering a file URL")
+            expect(
+                (try? FileManager.default.contentsOfDirectory(atPath: exports.path)) ?? [] == exportsBefore,
+                "without unsealing anything until a reader asks for the file")
             expect(
                 pb.string(forType: .string) == nil,
                 "but not as text, which a rich text field would take over the image")
             expect(
                 pb.types?.contains(ClipboardManager.internalType) == true,
                 "marked, so the poller skips our own write")
+
+            guard let file = (pb.readObjects(forClasses: [NSURL.self]) as? [URL])?.first else {
+                return fail("the file URL reads back")
+            }
+            let folder = file.deletingLastPathComponent()
+            expect(folder.deletingLastPathComponent().path == exports.path, "it is an export, in its own folder")
+            expect(!file.path.hasPrefix(store.imagesDir.path + "/"), "never the store's own blob")
+            expect(file.lastPathComponent == ClipboardExports.imageName, "under a readable name")
+            if FileManager.default.fileExists(atPath: file.path) {
+                expect((try? Data(contentsOf: file)) == bytes, "holding the unsealed image")
+                expect(permissions(of: file) == 0o600, "readable by its owner alone")
+                expect(permissions(of: folder) == 0o700, "in a folder only its owner can list")
+            } else {
+                fail("the export is still on disk for the reader that asked for it")
+            }
+            expect(
+                (pb.readObjects(forClasses: [NSURL.self]) as? [URL])?.first == file,
+                "a second reader is handed the same export")
+            expect(SealedFile.isSealed(blob), "while the stored blob stays sealed")
+
+            // AppKit reports the provider finished on handover, so the copy outlives the reads above.
+            pb.clearContents()
+            expect(
+                FileManager.default.fileExists(atPath: file.path),
+                "the export outlives the provider, for a reader that opens it later")
+            ClipboardExports.discardPasteboardCopies(in: exports)
+            expect(
+                !FileManager.default.fileExists(atPath: folder.path),
+                "and goes once the clipboard holds something else")
         }
+    }
+
+    /// The export's own calls take a root, so its shape is checked apart from any pasteboard.
+    static func exportsAreOwnerOnlyAndSwept() {
+        withScratch { dir in
+            let root = dir.appendingPathComponent("exports", isDirectory: true)
+            let bytes = Data("unsealed".utf8)
+            guard let first = try? ClipboardExports.write(bytes, in: root),
+                let second = try? ClipboardExports.write(bytes, in: root)
+            else { return fail("an export writes under the root it is given") }
+            expect(
+                [first, second].allSatisfy { $0.lastPathComponent == ClipboardExports.imageName },
+                "every export keeps the readable name")
+            expect(
+                first.deletingLastPathComponent() != second.deletingLastPathComponent(),
+                "each in a folder of its own")
+            expect((try? Data(contentsOf: first)) == bytes, "holding the bytes it was handed")
+            expect(permissions(of: first) == 0o600, "readable by its owner alone")
+            expect(permissions(of: first.deletingLastPathComponent()) == 0o700, "in an owner-only folder")
+            ClipboardExports.remove(first)
+            expect(
+                !FileManager.default.fileExists(atPath: first.deletingLastPathComponent().path)
+                    && FileManager.default.fileExists(atPath: second.path),
+                "removing one export takes its folder and no other")
+            ClipboardExports.sweep(in: root)
+            expect(!FileManager.default.fileExists(atPath: root.path), "the launch sweep takes every export")
+        }
+    }
+
+    static func permissions(of url: URL) -> Int? {
+        (try? FileManager.default.attributesOfItem(atPath: url.path))?[.posixPermissions] as? Int
     }
 
     // MARK: - Harness
@@ -394,4 +476,8 @@ enum Permissions {
 
 final class NotificationToken {
     init(_ observer: Any, center: NotificationCenter) {}
+}
+
+extension ClipboardCipher {
+    static let harness = ClipboardCipher(rootKey: SymmetricKey(size: .bits256))
 }

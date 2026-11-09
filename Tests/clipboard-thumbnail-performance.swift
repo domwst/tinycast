@@ -1,4 +1,5 @@
 import AppKit
+import CryptoKit
 import ImageIO
 import UniformTypeIdentifiers
 
@@ -7,6 +8,8 @@ import UniformTypeIdentifiers
 enum ClipboardThumbnailBenchmark {
     static let rowPixel: CGFloat = 64
     static let previewPixel: CGFloat = 900
+    /// Fixed, so the blobs `--fixtures` seals are the ones a later run can open.
+    static let key = SymmetricKey(data: Data(repeating: 0x5A, count: 32))
 
     static func milliseconds(_ start: ContinuousClock.Instant) -> Double {
         let duration = start.duration(to: .now).components
@@ -28,7 +31,7 @@ enum ClipboardThumbnailBenchmark {
         ]
     }
 
-    /// A seeded Display P3 "screenshot": a gradient under grain, which PNG can't compress away.
+    /// A seeded Display P3 "screenshot", sealed as the store keeps one; its grain defeats PNG.
     static func writeFixture(_ index: Int, to url: URL) {
         let (width, height) = [(3456, 2234), (3248, 2122), (3024, 1964)][index % 3]
         var state = UInt64(index + 1) &* 0x9E37_79B9_7F4A_7C15
@@ -50,10 +53,12 @@ enum ClipboardThumbnailBenchmark {
                 bytesPerRow: width * 4, space: space,
                 bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!.makeImage()!
         }
-        let destination = CGImageDestinationCreateWithURL(
-            url as CFURL, UTType.png.identifier as CFString, 1, nil)!
+        let data = NSMutableData()
+        let destination = CGImageDestinationCreateWithData(
+            data, UTType.png.identifier as CFString, 1, nil)!
         CGImageDestinationAddImage(destination, image, nil)
         precondition(CGImageDestinationFinalize(destination))
+        precondition((try? SealedFile.write(data as Data, to: url, key: key)) != nil)
     }
 
     static func main() async {
@@ -66,7 +71,8 @@ enum ClipboardThumbnailBenchmark {
         if arguments.contains("--fixtures") {
             try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             for index in 0..<10 {
-                writeFixture(index, to: directory.appendingPathComponent(String(format: "%02d.png", index)))
+                let name = String(format: "%02d.", index) + SealedFile.fileExtension
+                writeFixture(index, to: directory.appendingPathComponent(name))
             }
             return
         }
@@ -76,7 +82,7 @@ enum ClipboardThumbnailBenchmark {
         let urls =
             ((try? FileManager.default.contentsOfDirectory(
                 at: directory, includingPropertiesForKeys: nil)) ?? [])
-            .filter { $0.pathExtension == "png" }.sorted { $0.path < $1.path }
+            .filter { $0.pathExtension == SealedFile.fileExtension }.sorted { $0.path < $1.path }
         precondition(!urls.isEmpty, "run --fixtures first")
         let copiesBefore =
             (try? FileManager.default.contentsOfDirectory(
@@ -88,7 +94,8 @@ enum ClipboardThumbnailBenchmark {
         let rowsLoaded = await withTaskGroup(of: Bool.self) { group in
             for url in urls {
                 group.addTask {
-                    await ImageThumbnail.loadAsync(url, maxPixel: rowPixel, copyingWith: helper) != nil
+                    await ImageThumbnail.loadAsync(
+                        url, maxPixel: rowPixel, copyingWith: helper, key: key) != nil
                 }
             }
             var all = true
@@ -99,7 +106,8 @@ enum ClipboardThumbnailBenchmark {
         let previewsStart = ContinuousClock.now
         var previewsLoaded = true
         for url in urls {
-            let image = await ImageThumbnail.loadAsync(url, maxPixel: previewPixel, copyingWith: helper)
+            let image = await ImageThumbnail.loadAsync(
+                url, maxPixel: previewPixel, copyingWith: helper, key: key)
             previewsLoaded = previewsLoaded && image != nil
         }
         let previews = milliseconds(previewsStart)

@@ -25,21 +25,32 @@
 - **Paste Sequentially never promotes, and its walk is frozen at the first press.** `PasteSequence`
   keeps every entry's id, newest first, and resolves each against the live history, so a promotion
   cannot repeat or skip an entry and a deleted one is passed over rather than pasted.
-- **`Model/ClipboardStore.swift` keeps to Foundation plus SQLite3 and no other app source**, so
+- **`Model/ClipboardStore.swift` keeps to Foundation, CryptoKit and SQLite3**, plus its own
+  `ClipboardCipher` and `ClipboardQuery` and `Platform/SealedFile` and `ImageDerivative`, so
   `clipboard-test` can compile it standalone. It uses `isolated deinit` for its SQLite teardown.
+- **History never reaches the disk unsealed.** Clip text, file paths, source apps and recognized
+  text are AES-GCM sealed per column, image blobs and their thumbnails are `SealedFile`s, and there
+  is no full-text index, which would be a plaintext copy. The one exception is a copy another app is
+  handed by path — a paste's file URL — made in `Caches/clipboard-exports/` only on request and
+  removed once the clipboard holds something else. See [Encryption at rest](#encryption-at-rest).
+- **The Model layer never builds a cipher.** `ClipboardStore` opens only with the one
+  `ClipboardKeyStore.unlock` hands `ClipboardCoordinator`, read from the Keychain off-main; a harness
+  passes its own random key. Nothing defaults to a key, because a default would be a real one.
 - **An image capture keeps the generation from its pasteboard poll.** Clear History and store close
   retire it across conversion and file writing; a stale capture inserts nothing and leaves no blob.
-- A database that cannot be opened is deleted and recreated. That is sound because a history is
-  captured rather than authored, and there is no UI for an unavailable clipboard — `QuicklinkStore`
-  deliberately does the opposite. It is **not** a licence to treat the file as disposable: it lives in
-  Application Support precisely because nothing else can put it back.
+- A database that cannot be opened is deleted and recreated, and so is one of another
+  `schemaVersion` or sealed under another key, which its canary refuses. That is sound because a
+  history is captured rather than authored — `QuicklinkStore` deliberately does the opposite. It is
+  **not** a licence to treat the file as disposable: it lives in Application Support precisely
+  because nothing else can put it back. A Keychain that answers with an error rather than "no such
+  item" never gets this treatment: the store stays shut for the session and a HUD says so.
 - **A link or an address is derived from the text, never persisted.** `ClipboardItem.Kind` holds
   only what capture can tell apart on the pasteboard — `text`, `image`, `file` — so improving the
   *classifier* stays a code change rather than a database migration plus a backfill, while a new
   kind needs a new pasteboard type to justify it. `textForm` is nil for anything but `.text`, which
   is what keeps a path shaped like `apple.com/report.pdf` out of the links.
 - **A `.file` entry references the file where it lies and never copies it.** Its absolute path is
-  the `text` column, so the trigram index finds it by name or by folder for free, and `imagePath`
+  the `text` column, so search finds it by name or by folder for free, and `imagePath`
   stays nil — which is what keeps `prune`, `deleteBlob` and `owns` from ever reaching a file
   Tinycast did not write. `kind` is a plain `TEXT` column, so the case cost no migration; an older
   build simply fails to decode the row.
@@ -54,7 +65,8 @@
   captured.
 - **No recognition ever runs in the app process.** `ClipboardTextWorker` spawns one bundled
   `ClipboardTextHelper` per item and reaps it, which is the whole reason Vision's and PDFKit's
-  allocations do not accumulate in Tinycast. The helper is handed a path and answers with text.
+  allocations do not accumulate in Tinycast. The helper is handed a referenced file's path, or a
+  sealed blob's plaintext over stdin, and answers with text.
 
 ## Poll-based capture
 
@@ -130,47 +142,54 @@ stream against a pasteboard of its own.
 
 ## Store
 
-`ClipboardStore` is SQLite-backed: rows plus a trigram FTS5 index in `clipboard.sqlite3`, with image
-blobs as loose PNG files, all under `~/Library/Application Support/<bundle-id>/`. The newest 1000 rows
-are mirrored in the observable `items` window; FTS search reaches older rows.
+`ClipboardStore` is SQLite-backed: rows in `clipboard.sqlite3`, with image blobs as loose sealed
+files, all under `~/Library/Application Support/<bundle-id>/`. The newest 1000 rows are mirrored in
+the observable `items` window; the off-main scan in [Search](#search) reaches older rows.
 
 **Application Support, not Caches.** `~/Library/Caches` is excluded from Time Machine and the system
 may reclaim it at any time without telling the app, so a history kept there survives neither a restore
 nor a full disk — while the retention setting offers **Forever** and a pin is an explicit act.
 
-A database that won't open is deleted and recreated (worst case the store degrades to session-only
-in-memory history).
+A database that won't open, or that `prepareSchema` refuses, is deleted and recreated (worst case the
+store degrades to session-only in-memory history).
 
-Image capture (TIFF→PNG re-encode + blob write) runs off the main actor via detached tasks; row
-inserts, original-text search, and pruning stay on the main actor.
-Image copy uses Foundation’s `mappedIfSafe` hint before publishing the original PNG, its file URL
-and marker. The file URL is what a terminal pastes, as the path, since it ignores image data; there
-is deliberately no `.string`, which a rich text field would take over the image.
+Image capture (TIFF→PNG re-encode, seal and blob write) runs off the main actor via detached tasks;
+row inserts, resident search, and pruning stay on the main actor. A capture is
+`<uuid>.png.sealed`. Copying an image puts its unsealed PNG on the pasteboard and promises a file URL
+through `ClipboardImageFileProvider`: only a reader that asks for one, such as a terminal pasting the
+path, gets an exported copy. AppKit reports the provider finished as soon as it hands the URL over,
+long before the reader opens it, so the copy is kept until the clipboard moves on —
+`discardPasteboardCopies` runs on Tinycast's next write and on the poller's next foreign change —
+and the launch sweep takes any a quit left. There is deliberately no
+`.string`, which a rich text field would take over the image.
 
 **Tiles and previews decode a copy, not the blob.** A PNG can't decode partially, so a 64px tile of a
-6K screenshot cost its full bitmap. The first draw of an owned image has `ClipboardTextHelper` write
-the `ImageDerivative` copy it needs, 256px for a row or 1080px for the preview, to
-`images/.thumbnails/` (excluded from backup); later draws decode those. Without a readable copy, from a
-failed or timed-out helper or a size past 1080px, the original is decoded in the app as before.
-Copies are made and deleted on one serial `ImageDerivative.queue`, so a copy's delete waits out the
-copy in flight; the blob itself is still deleted at once. The helper's wait runs on that queue, off
-the cooperative pool, with a 10 s deadline and the caller's cancellation. `load` sweeps copies whose
-blob is gone, which a quit before the queue ran can leave. Copies are keyed by the blob's whole file
-name. An image outside `images/`, such as a Raycast import, never gets copies.
+6K screenshot cost its full bitmap. The first draw of an owned image unseals it, pipes it to
+`ClipboardTextHelper thumbnail <edge>` and seals the PNG that comes back as the `ImageDerivative`
+copy it needs, 256px for a row or 1080px for the preview, in `images/.thumbnails/` (excluded from
+backup); later draws unseal and decode those. Without a readable copy, from a failed or timed-out
+helper or a size past 1080px, the original is unsealed and decoded in the app as before. Copies are
+made and deleted on one serial `ImageDerivative.queue`, so a copy's delete waits out the copy in
+flight; the blob itself is still deleted at once. The helper's wait runs on that queue, off the
+cooperative pool, with a 10 s deadline and the caller's cancellation, and its stdin is written apart
+from the stdout read so a full pipe can't deadlock it. `load` sweeps copies whose blob is gone,
+which a quit before the queue ran can leave. Copies are keyed by the blob's whole file name.
 
-**A backup reads the whole table, not `items`.** `forEachStoredItem(inDatabaseAt:)` is `nonisolated`
-and opens a second connection, because the resident window stops at 1000 rows while the table is
-capped only by age — an export that read `items` would silently drop the rest of someone's history,
-and walking an uncapped table is not main-actor work. That connection is `SQLITE_OPEN_READWRITE`,
-not read-only: a read-only connection to a WAL database still has to create its `-shm` file, and
-fails confusingly when it cannot. It reads in `rowid` order, oldest first, so a streaming
-import rebuilds the same order it exported.
+**A backup reads the whole table, not `items`.** `forEachStoredItem(inDatabaseAt:cipher:)` is
+`nonisolated` and opens a second connection, because the resident window stops at 1000 rows while
+the table is capped only by age — an export that read `items` would silently drop the rest of
+someone's history, and walking an uncapped table is not main-actor work. That connection is
+`SQLITE_OPEN_READWRITE`, not read-only: a read-only connection to a WAL database still has to create
+its `-shm` file, and fails confusingly when it cannot. It reads in `rowid` order, oldest first, so a
+streaming import rebuilds the same order it exported, and it answers how many rows would not open,
+which the export counts as missing rather than dropping quietly.
 
-**A restore streams back the same way.** `importStoredItems(inDatabaseAt:adoptingImagesInto:_:)` is the
-one insert path a bulk import takes, `importEntries` included: it hashes the existing rows once into a
-dedupe set rather than scanning the table per candidate, holds one transaction, and moves a staged blob
-into `imagesDir` only once the row is known to be new. `adoptingImagesInto` is nil where the paths
-handed in are already the ones to keep, as the Raycast import's are.
+**A restore streams back the same way.** `importStoredItems(inDatabaseAt:adoptingImagesInto:cipher:_:)`
+is the one insert path a bulk import takes, `importEntries` included: it hashes the existing rows once
+into a dedupe set rather than scanning the table per candidate, holds one transaction, and seals a
+copy of each staged or imported image into `imagesDir` as `<name>.sealed` (so `a.jpg` and `a.png` stay apart) only once the row is known
+to be new. It copies rather than moves, because a Raycast import hands it Raycast's own files; an
+image whose source has gone is left out.
 
 **The load query is deliberately two indexed branches**, not one `pinned_at IS NOT NULL OR rowid >= ?`.
 It fetches every pinned row plus the newest `memoryWindow` unpinned ones, keyed off the floor rowid
@@ -178,20 +197,88 @@ that `windowFloor` looks up. The planner cannot drive an `OR` from an index whil
 order, so the single-predicate form reads the whole table instead. The floor is 0 — meaning no floor,
 load everything — while the history is shorter than the window.
 
-Searching is trigram FTS, which needs **at least three characters**; shorter queries, and the
-no-database fallback path, filter the in-memory window instead. Results are memoized one query deep,
-with a second memo for the empty query, and both are invalidated whenever `items` changes.
-The FTS query picks its newest `searchLimit` row IDs before materializing rows, so a broad query
-never builds more items than it can show. Pins are still matched separately in memory, and the type
-filter applies after the limit. `promote` updates the row's timestamp and rowid in one statement
-rather than deleting and re-inserting it, because a delete would take the row's recognized text with
-it; an update trigger moves the original-text FTS entry to the new rowid. The UUID and the image blob
-are untouched.
+`promote` updates the row's timestamp and rowid in one statement rather than deleting and
+re-inserting it, because a delete would take the row's recognized text with it. The UUID, the sealed
+values and the image blob are untouched.
 
-Files under the store's own `imagesDir` are **owned**: pruned and deleted with their row. External
-references — an image imported from another app's cache — are left on disk when the row goes. A
-retention cut can strand hundreds of files, so those deletions run off the main actor to keep
-capture-time pruning from hitching.
+Files under the store's own `imagesDir` are **owned**: pruned and deleted with their row. A retention
+cut can strand hundreds of files, so those deletions run off the main actor to keep capture-time
+pruning from hitching. `load` also deletes anything in `images/` or `.thumbnails/` that isn't a
+`.sealed` file, and any `.partial` seal older than a minute: an older build or an interrupted
+conversion is the only way plaintext could be there.
+
+## Encryption at rest
+
+**One root key per channel, in the login Keychain.** `ClipboardKeyStore` keeps 32 random bytes
+under `<bundle-id>.clipboard-key`, so the legacy keychain's access list trusts only the app that
+created it and any other process reading it gets the system prompt. `unlock` runs off-main, since a
+Keychain read can wait on that prompt, and decides:
+
+- **Found:** the history opens with it.
+- **Not found** (first launch, or a reset Keychain): a new key is saved *before* anything is sealed
+  with it, and any history sealed under the lost key is deleted with its blobs, since nothing can
+  ever open it again. A garbled item counts as not found.
+- **Any other error:** the store stays shut for the session and the coordinator shows
+  "Clipboard history is locked"; nothing is deleted and nothing new is recorded.
+
+`ClipboardCipher` derives two keys from the root key with HKDF-SHA256: one for column values and one
+for blobs. A column value is AES-GCM with a random nonce and the field name plus row id as associated
+data, so a sealed `text` can't be moved into another row or into `source_app`. `meta` holds a canary
+sealed the same way; a file whose canary won't open under this key is refused and starts over.
+`kind`, `image_path`, `created_at` and `pinned_at` stay plain, because ordering, pruning and the two
+load branches are SQL over them.
+
+**`SealedFile` is the blob format**, for images and their thumbnails: `TCSF`, a version byte and a
+7-byte random nonce prefix, then the plaintext in 64 KiB segments, each AES-GCM-sealed with its tag.
+A segment's nonce is the prefix, its big-endian index and a final-segment flag, and the file name is
+associated data, so a renamed, reordered, truncated or extended file fails to open, and a cut exactly
+on a segment boundary fails on the flag. `plaintextSize` follows from the file size alone, which is
+how the info pane states a size without unsealing. Writes go to a hidden `.partial` beside the target
+and rename over it. `clipboard-cipher-test` holds the format to all of this.
+
+**A plaintext history from before encryption is converted once.**
+`ClipboardEncryptionMigration` runs inside `unlock`, even with the feature switched off, so an old
+history never stays plaintext just because capture is off. It builds `clipboard.sqlite3.converting`
+with a rollback journal, sealing each row in `rowid` order and copying each image to a `.sealed` blob
+(Raycast's own files are copied, never touched), then removes the old file, renames the new one into
+place, and deletes the old PNGs and thumbnails. Every step can be repeated after a crash. A user who
+skips the release that carries it loses that history instead: the store refuses the old
+`user_version` and `load` deletes the unsealed files, so skipping it never leaves plaintext behind.
+
+**What this does not cover, and says so.** Copies of the old plaintext in Time Machine backups and
+APFS snapshots made before the conversion age out on their own schedule; FileVault is what protects
+the disk. The live pasteboard is plaintext to every app, as it is for every clipboard manager. A
+sealed value's length tells roughly how long a clip is. Anything able to approve a Keychain prompt as
+the user can read the key. A backup's staging tree in `Caches` holds plaintext while an export or
+import runs; `AppCore.start` sweeps any a crash left.
+
+## Search
+
+A query is whitespace-separated terms, **all required, in any order**, each a case- and
+diacritic-insensitive substring (`ClipboardQuery.matchesExactly`), so `token github` finds
+"github token" and `cafe` finds "Café". Quotes are ordinary characters. With no full-text index, the
+work is split by cost:
+
+- **On the main actor, synchronously:** pins and the resident window, exact only. This is what
+  answers on the keystroke, and the memo below keeps it one query deep.
+- **Off it, in one cancellable scan** over a second connection: rows below the window, recognized
+  text, and **loose** matches anywhere. A term of four or more letters or digits matches loosely
+  within one edit of a word (two from eight characters, optimal string alignment, so a swap is one
+  edit), and the last term, still being typed, may also match the start of a longer word: `pasword`
+  and `passw` both find "password". Ideographic terms stay exact, since a "word" there is a
+  sentence. The scan unseals as it goes, applies the type filter, and stops once exact matches alone
+  fill the budget.
+
+Resident rows matched by their own text come first and are never displaced; exact matches the scan
+finds (older rows, and recognized text anywhere) fill the 200-row `searchLimit` newest first, and
+loose ones take what is left. Pins sit outside the budget, so the scan reads them in a pass of their
+own. The answer then returns to recency order — the window's own order, then older rows by rowid —
+because the date headers assume it. Which rows are resident comes from `items` itself, never a
+rowid cut-off: a removal or a pin leaves the window short until the next load. A scan runs only while the palette shows (`setSearchActive`), publishes through
+`searchRevision` and `onSearchResultsChanged` so the selection follows its row, and leaves
+`isSearching` true meanwhile, which the empty state reads as "Searching…" rather than "no results".
+Queries under three characters stay resident, as they always have. Results are memoized one query
+deep, with a second memo for the empty query, and both are invalidated whenever `items` changes.
 
 ## Image and PDF text search
 
@@ -218,20 +305,20 @@ does its blocking read and wait on its own `DispatchQueue`, never the cooperativ
 exists while text search is off or the queue is empty — a Copy Text trigger is the exception: the
 helper is bundled either way, so an explicit extraction spawns one with the search switch off.
 
-Images include owned clipboard PNGs and referenced image files. Referenced PDFs use PDFKit's embedded
+Images include owned sealed clipboard blobs, unsealed into the helper's stdin, and referenced image
+files. Referenced PDFs use PDFKit's embedded
 text page by page, with Vision OCR for pages without text. Mixed text-and-scan documents therefore
 remain searchable; images embedded on a page that already has text are not separately OCR'd. All
 processing stays on this Mac. Extracted text is search metadata, never the value pasted or
 copied — Copy Text below is the deliberate exception, a copy the reader asks for.
 
-The derived `item_text` table and its trigram FTS index persist metadata without adding extracted
-strings to `ClipboardItem` or loading them into the resident history. Original text/path search returns
-immediately. A cancellable off-main SQLite query adds OCR-only matches for All, Images and Files;
-Text, Links, Emails and Colors never consult OCR. Type classification always uses original content.
-There is no spinner or skeleton. Pins lead in pin order, ordinary unpinned matches keep theirs, and
-OCR-only unpinned matches of the active type fill what is left of the same `searchLimit` budget, in
-history recency rather than extraction order — a deliberate choice to let an ordinary match answer
-first. Queries under three characters consult only the resident window and pins.
+The derived `item_text` table persists sealed metadata without adding extracted strings to
+`ClipboardItem` or loading them into the resident history; an image with no text is stored as NULL,
+which switching search back on retries. The [search](#search) scan reads it for All, Images and
+Files; Text, Links, Emails and Colors never consult OCR. Type classification always uses original
+content. Recognized text counts as an exact match when a term is a substring of it, and loose
+matching applies to it as to the clip. Queries under three characters read it only for resident rows
+and pins.
 
 Each reader takes a 2 MiB SQLite cache budget and closes its connection when it finishes. A new
 query or filter, palette dismissal, disabling, and any history mutation cancel work that is now
@@ -294,20 +381,19 @@ panel. ↵ starts a new line as in any editor, so ⌘↵ saves and Esc cancels �
 `DialogAccessory.acceptsLineBreaks` is what hands ↵ to the field. An input method's ↵ always commits
 its marked text, in every dialog.
 
-`ClipboardStore.updateText(_:of:)` rewrites the row's `text` under the same id, so the `items_au`
-trigger reindexes FTS and nothing else changes. `Paster.copy` then writes it marked and promotes it
+`ClipboardStore.updateText(_:of:)` reseals the row's `text` under the same id, and nothing else
+changes. `Paster.copy` then writes it marked and promotes it
 unless pinned, and the palette stays up with the row selected and scrolled into view, so ⌘V pastes
 the edit and so does ↵ on the row. A query or type filter that hides the edit is cleared; matching
 ones stay. The palette preserves the row through its query and filter observers, including a pin
 past the first row. An empty edit changes nothing. An entry deleted while open — by
 retention, say — is not brought back: `updateText` answers nil and the text goes on the pasteboard
-**unmarked**, entering history as a new copy rather than being lost. A row found by FTS past the
+**unmarked**, entering history as a new copy rather than being lost. A row a scan found past the
 resident window has no in-memory copy to replace, so the store drops its search memo instead.
 Database write failures throw instead of taking the deleted-entry path: the HUD reports the failure,
 and neither the clipboard nor the selection changes.
 An edit is held to `ClipboardStore.maxTextLength`, the same 32,000 characters capture records, so a
-longer one is refused with a HUD and nothing changes; past that, every later paste of the entry
-would reindex it on the main actor.
+longer one is refused with a HUD and nothing changes.
 
 ## Type filter
 
@@ -341,9 +427,8 @@ under the wrong type, and `clipboard-test` pins the cases that matter.
 
 `search(_:filter:)` filters **after** the pinned/rest split, so a matching pin still leads its block
 in pin order, and the filter joins the search memo's key — keying on the query alone would serve
-stale rows for a render or more, since the filter changes without the query moving. One consequence
-of filtering after the fact: the FTS statement's `LIMIT 200` applies to the *unfiltered* matches, so
-a narrow filter over a broad query can show fewer rows than the history holds.
+stale rows for a render or more, since the filter changes without the query moving. The scan applies
+the filter as it reads, so the 200-row budget is spent on rows of the chosen type.
 
 ## Colours
 
@@ -411,15 +496,14 @@ recency.
 
 Pins change five things:
 
-- **Order.** `search` returns pinned rows first — for the empty query and for FTS hits alike — under
+- **Order.** `search` returns pinned rows first — for the empty query and for scan hits alike — under
   one "Pinned" section above the date buckets, in pin order with the oldest pin at the top, so a new
   pin joins the end of the section instead of displacing the ones already there. `items` itself stays
   in pure recency order; the display split is memoized next to the search memo and invalidated with
-  it. Original text on pinned rows is matched **in memory**
-  rather than taken from the FTS result, since the statement's `LIMIT` could otherwise drop one out
-  of a busy query's matches — which holds because every pinned row is resident in `items`, however
-  old (`load` fetches them all, and neither the window trim nor pruning drops one). OCR metadata
-  for matching pins is queried separately off-main without the unpinned result limit.
+  it. Original text on pinned rows is matched exactly **in memory**, which holds because every
+  pinned row is resident in `items`, however old (`load` fetches them all, and neither the window
+  trim nor pruning drops one). The scan adds pins that match only loosely or by recognized text,
+  without the unpinned result limit.
 - **Unpinning re-recencies.** An unpinned row rejoins the history as its _newest_ entry (Raycast does
   the same) rather than dropping back into the date bucket it came from, which would scroll the list
   out from under the selection. It uses the same atomic timestamp and rowid update as `promote`.
@@ -434,8 +518,7 @@ Pins change five things:
   query lands on its first match instead, pinned or not: the pins are results then, not a shelf.
 
 Pasting a pinned entry deliberately does **not** promote it: it holds its place in the Pinned
-section, so `promote` skips pinned rows instead of rewriting the row and its FTS entry for no
-visible change.
+section, so `promote` skips pinned rows instead of rewriting the row for no visible change.
 
 Paste and Keep Window Open (⌥↵) does not promote any entry. The rows hold still under the
 selection, so ↓ then ⌥↵ pastes a run of entries in order. `Paster.write` therefore only writes the

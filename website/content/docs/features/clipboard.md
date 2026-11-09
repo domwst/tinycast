@@ -31,7 +31,7 @@ The footer shows where a paste will go, like "Paste to Notes".
 | Pin / Unpin Entry          | <kbd>⌘</kbd><kbd>.</kbd>                            |
 | Edit Entry                 | <kbd>⌘</kbd><kbd>E</kbd>                            |
 | Copy Text, on an image     | <kbd>⇧</kbd><kbd>⌘</kbd><kbd>T</kbd>                |
-| Show in Finder             | <kbd>⌘</kbd><kbd>F</kbd>                            |
+| Save Image… / Show in Finder | <kbd>⌘</kbd><kbd>F</kbd>                          |
 | Paste a pinned entry       | <kbd>⌘</kbd><kbd>1</kbd> … <kbd>⌘</kbd><kbd>0</kbd> |
 | Delete Entry               | <kbd>⌃</kbd><kbd>X</kbd>                            |
 | Delete All Entries         | <kbd>⌃</kbd><kbd>⇧</kbd><kbd>X</kbd>                |
@@ -79,9 +79,21 @@ oldest entry, it shows **Nothing left to paste** instead of starting over.
 
 If a file has been moved or deleted since you copied it, it stays in your history, because its old
 location can still be useful. Pasting it shows a message instead of failing silently. For file
-entries, <kbd>⌘</kbd><kbd>K</kbd> also offers **Show in Finder**, **Open** and **Copy Path**.
+entries, <kbd>⌘</kbd><kbd>K</kbd> also offers **Show in Finder**, **Open** and **Copy Path**. For a
+copied image, it offers **Save Image…**.
 
 You can play video and audio files in the preview. Nothing plays until you press play.
+
+## Searching
+
+Type one or more words. Every word has to appear, in any order, so `token github` finds
+"github token". Capital letters and accents don't matter: `cafe` finds "Café".
+
+Small typos are forgiven in words of four letters or more. `pasword` finds "password", and so does
+`passw` while you're still typing. Words in Chinese, Japanese and Korean need an exact match.
+
+Recent entries match the moment you type. Older entries, typo matches and text in images appear a
+moment later; until then the list says **Searching…**.
 
 ## Filtering by type
 
@@ -155,13 +167,25 @@ which process wrote each copy, and if that can't be found out, it falls back to 
 
 ## Limits worth knowing
 
-History is stored in `clipboard.sqlite3`, with images next to it, in Tinycast's Application Support
-folder. Because it isn't in Caches, Time Machine backs it up and macOS never clears it on its own.
+History is stored **encrypted** in `clipboard.sqlite3`, with encrypted images next to it, in
+Tinycast's Application Support folder. Because it isn't in Caches, Time Machine backs it up and macOS
+never clears it on its own.
+
+- The key is in your login Keychain. Other apps can't read your history from disk without it, and
+  asking the Keychain for it shows a system prompt. If the Keychain can't be read, history stays
+  locked and Tinycast tells you, instead of starting over.
+- History saved by an older version is encrypted the first time this version starts, even if
+  clipboard history is turned off.
+- When you paste an image into an app that wants a file, such as Terminal, Tinycast hands it a
+  temporary copy that it deletes when you copy something else. Dragging an image writes it straight to
+  where you drop it. On an image, <kbd>⌘</kbd><kbd>F</kbd> is **Save Image…** instead of
+  **Show in Finder**, because the stored file is encrypted.
+- Older backups and Time Machine snapshots made before the update still hold the unencrypted copy
+  until they're deleted. Turn on FileVault to protect the whole disk.
 
 - Tinycast checks the clipboard twice a second. It recognizes and skips its own pastes, so pasting
   from Tinycast never adds a new entry.
 - The newest **1,000** entries are kept in memory. Search also covers older entries.
-- **Search needs at least three characters** to use the full index. Shorter searches only look
+- **Search needs at least three characters** to reach older entries. Shorter searches only look
   through the recent entries in memory.
-- A search returns at most 200 matches before the type filter is applied, so a narrow filter on a
-  broad search can show fewer results than your history contains.
+- A search returns at most 200 matches. Exact matches come before typo matches.

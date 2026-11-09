@@ -9,6 +9,7 @@ enum BackupComposer {
         var appVersion: String
         var settings: Data?
         var clipboardDatabase: URL?
+        var clipboardCipher: ClipboardCipher?
         var snippetsDirectory: URL?
         var notesDirectory: URL?
         var learning: [BackupBundle.LearningPart: Data] = [:]
@@ -21,7 +22,9 @@ enum BackupComposer {
         var missingImages: Int
     }
 
-    static func plan(_ categories: Set<BackupCategory>, from core: AppCore) -> Plan {
+    static func plan(
+        _ categories: Set<BackupCategory>, from core: AppCore, clipboardCipher: ClipboardCipher?
+    ) -> Plan {
         var plan = Plan(
             categories: categories,
             appVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString")
@@ -29,7 +32,10 @@ enum BackupComposer {
         if categories.contains(.configuration) {
             plan.settings = try? SettingsBackup.gather(from: core).encoded()
         }
-        if categories.contains(.clipboard) { plan.clipboardDatabase = core.clipboardStore.dbURL }
+        if categories.contains(.clipboard), let clipboardCipher {
+            plan.clipboardDatabase = core.clipboardStore.dbURL
+            plan.clipboardCipher = clipboardCipher
+        }
         if categories.contains(.snippets) {
             plan.snippetsDirectory = core.snippetsStore.snippetsDirectory
         }
@@ -56,8 +62,8 @@ enum BackupComposer {
             try bundle.write(settings, to: bundle.settingsURL)
             counts[BackupCategory.configuration.rawValue] = 1
         }
-        if let database = plan.clipboardDatabase {
-            let outcome = try writeClipboard(from: database, into: bundle)
+        if let database = plan.clipboardDatabase, let cipher = plan.clipboardCipher {
+            let outcome = try writeClipboard(from: database, cipher: cipher, into: bundle)
             counts[BackupCategory.clipboard.rawValue] = outcome.written
             missingImages = outcome.missing
         }
@@ -83,7 +89,7 @@ enum BackupComposer {
     // MARK: - Parts
 
     private nonisolated static func writeClipboard(
-        from database: URL, into bundle: BackupBundle
+        from database: URL, cipher: ClipboardCipher, into bundle: BackupBundle
     )
         throws -> (written: Int, missing: Int)
     {
@@ -91,10 +97,12 @@ enum BackupComposer {
         var written = 0
         var missing = 0
         var failure: Error?
-        ClipboardStore.forEachStoredItem(inDatabaseAt: database) { item in
+        let unreadable = ClipboardStore.forEachStoredItem(
+            inDatabaseAt: database, cipher: cipher
+        ) { item in
             guard failure == nil else { return }
             do {
-                guard let portable = try portableItem(item, into: bundle) else {
+                guard let portable = try portableItem(item, unsealingWith: cipher, into: bundle) else {
                     missing += 1
                     return
                 }
@@ -105,12 +113,12 @@ enum BackupComposer {
             }
         }
         if let failure { throw failure }
-        return (written, missing)
+        return (written, missing + unreadable)
     }
 
-    /// nil when the image has gone; hardlinked where the volume allows, so PNGs cost inodes.
+    /// nil when the image has gone; a sealed blob leaves as the PNG it holds, a backup's own seal.
     private nonisolated static func portableItem(
-        _ item: ClipboardItem, into bundle: BackupBundle
+        _ item: ClipboardItem, unsealingWith cipher: ClipboardCipher, into bundle: BackupBundle
     )
         throws -> BackupClipboardItem?
     {
@@ -120,8 +128,10 @@ enum BackupComposer {
                 FileManager.default.fileExists(atPath: path)
             else { return nil }
             let source = URL(fileURLWithPath: path)
-            // The stored blob's own name, so exporting twice names the same clip the same way.
-            var name = source.lastPathComponent
+            // The name it was sealed from, so a re-import seals back onto the same blob and dedupes.
+            var name =
+                source.pathExtension == SealedFile.fileExtension
+                ? source.deletingPathExtension().lastPathComponent : source.lastPathComponent
             var destination = bundle.clipboardImagesDirectory.appendingPathComponent(name)
             if !BackupBundle.isSafeName(name)
                 || FileManager.default.fileExists(atPath: destination.path)
@@ -129,7 +139,10 @@ enum BackupComposer {
                 name = UUID().uuidString + ".png"
                 destination = bundle.clipboardImagesDirectory.appendingPathComponent(name)
             }
-            if (try? FileManager.default.linkItem(at: source, to: destination)) == nil {
+            if SealedFile.isSealed(source) {
+                guard let image = try? SealedFile.read(source, key: cipher.blobKey) else { return nil }
+                try image.write(to: destination)
+            } else if (try? FileManager.default.linkItem(at: source, to: destination)) == nil {
                 try FileManager.default.copyItem(at: source, to: destination)
             }
             imageName = name

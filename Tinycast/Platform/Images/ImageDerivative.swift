@@ -1,6 +1,6 @@
 import Foundation
 
-/// A smaller copy of an immutable image blob, kept beside it so a tile never decodes the original.
+/// A smaller sealed copy of a sealed image blob, so a tile never decodes the original.
 struct ImageDerivative: Sendable {
     static let edges = [256, 1080]
 
@@ -46,7 +46,9 @@ struct ImageDerivative: Sendable {
     /// Keyed by the whole file name, so `a.jpg` and `a.png` never share a copy.
     private init(_ original: URL, edge: Int) {
         url = Self.folder(beside: original)
-            .appending(path: "\(original.lastPathComponent)-\(edge).png", directoryHint: .notDirectory)
+            .appending(
+                path: "\(original.lastPathComponent)-\(edge).\(SealedFile.fileExtension)",
+                directoryHint: .notDirectory)
         self.edge = edge
     }
 }

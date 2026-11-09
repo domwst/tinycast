@@ -88,7 +88,7 @@ final class PaletteWindowController: NSObject, NSWindowDelegate {
             // Events go stale while the palette is closed, and the countdown only ticks while up.
             core.calendarCoordinator.paletteDidShow()
             core.palette.noteVisible(true)
-            core.clipboardStore.setTextSearchActive(true)
+            core.clipboardStore.setSearchActive(true)
             // Non-activating, so summoning never raises our own aux windows behind it.
             panel.makeKeyAndOrderFront(nil)
             panel.orderFrontRegardless()
@@ -157,7 +157,7 @@ final class PaletteWindowController: NSObject, NSWindowDelegate {
         core.calendarCoordinator.paletteDidHide()
         core.roomCoordinator.paletteDidHide()
         core.palette.noteVisible(false)
-        core.clipboardStore.setTextSearchActive(false)
+        core.clipboardStore.setSearchActive(false)
         // Drop the anchor, so the next summon re-resolves for the screen in use then.
         anchor = nil
         // The guides must never outlive the panel they point at.

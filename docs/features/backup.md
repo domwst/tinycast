@@ -108,8 +108,9 @@ through one would leave the tree the caller chose. Composing resolves a link for
 symlinked note travels as a file. `backup-archive-test` builds both hostile archives header-by-header
 and asserts nothing escapes.
 
-**Staging lives in `Caches`, not `temporaryDirectory`.** It has to sit on the same volume as
-Application Support for a clipboard PNG to cross into the bundle as a hardlink rather than a copy.
+**Staging lives in `Caches`, not `temporaryDirectory`.** Export unseals each clipboard image into
+it as a PNG and writes the clips' text as JSONL, so for the length of a run the staging tree is
+plaintext; it is the archive that leaves the Mac encrypted.
 Leaving the Settings pane discards a tree the user opened but never imported; `BackupStaging` sweeps
 anything a day old on the next run, and `AppCore.start` sweeps every tree older than the launch, since a
 run killed mid-flight leaves its plaintext behind.
@@ -146,9 +147,10 @@ Per category:
   `confirmExecutableImport` first.
 - **Clipboard** streams through `ClipboardStore.importStoredItems`, off the main actor and on its own
   connection: a restored history runs past the memory window and must never sit in memory or freeze the
-  UI. A row is deduped on its text, or on the path its image takes; the blob keeps the name the bundle
-  gave it, so importing one file twice lands on the same path and adds nothing. Only a file inside
-  `imagesDir` is one retention can ever reclaim, which is why the blob moves there before the row lands.
+  UI. A row is deduped on its text, or on the path its image takes; the staged `<name>.png` is
+  sealed into `imagesDir` as `<name>.png.sealed`, the blob it was exported from, so importing one
+  file twice lands on the same path and adds nothing, and the row only lands once its blob has. Importing clips opens the history for the
+  write even with the feature off, as Clear History does, and reports a locked history as a problem.
 - **Snippets** merge through `importSnippets`, deduped on name and body so importing the same file
   twice doesn't leave a second copy of everything. Importing snippets does not enable snippets.
 - **Notes** land as new files through `NotesRepository.importNotes`, which suffixes a title that is

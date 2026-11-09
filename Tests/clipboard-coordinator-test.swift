@@ -1,4 +1,5 @@
 import AppKit
+import CryptoKit
 import SQLite3
 
 @main
@@ -112,7 +113,7 @@ struct ClipboardCoordinatorTests {
             Paster.plainCopies.isEmpty && Paster.copies.isEmpty,
             "a closed store never copies a supposed deletion")
         expect(fixture.core.messages.count == 1, "an unavailable database reports the save failure")
-        fixture.store.open()
+        fixture.store.open(cipher: .harness)
         fixture.store.load()
         expect(
             fixture.store.items.first(where: { $0.id == fixture.item.id })?.text == fixture.item.text,
@@ -192,7 +193,7 @@ struct ClipboardCoordinatorTests {
         init(text: String = "draft selected", pinned: Bool = false) {
             Paster.copies = []
             Paster.plainCopies = []
-            store = ClipboardStore(directory: directory)
+            store = ClipboardStore(directory: directory, cipher: .harness)
             store.addText("other pin", sourceBundleID: nil)
             store.togglePinned(store.items[0])
             store.addText(text, sourceBundleID: "test.source")
@@ -268,7 +269,28 @@ enum AppLauncher {
 }
 
 enum ClipboardTextWorker {
-    static func extract(_ item: ClipboardItem) async throws -> String { "" }
+    static func extract(_ item: ClipboardItem, imageKey: SymmetricKey?) async throws -> String { "" }
+}
+
+enum ClipboardKeyStore {
+    enum Failure: LocalizedError { case locked }
+    enum Unlock: Sendable {
+        case ready(ClipboardCipher)
+        case unavailable
+    }
+    static func unlock(database: URL, images: URL) -> Unlock { .ready(.harness) }
+}
+
+enum ClipboardEncryptionMigration {
+    static func isPending(database: URL) -> Bool { false }
+}
+
+enum ClipboardExports {
+    static let imageName = "Clipboard Image.png"
+}
+
+extension ClipboardCipher {
+    static let harness = ClipboardCipher(rootKey: SymmetricKey(size: .bits256))
 }
 
 @MainActor

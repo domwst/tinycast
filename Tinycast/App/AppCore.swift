@@ -358,7 +358,10 @@ final class AppCore {
             Task { await emojiIndex.load(languages: SystemLanguages.preferred) }
             currencyRates.start()
             let launched = Date()
-            Task.detached(priority: .utility) { BackupStaging.sweepOrphans(before: launched) }
+            Task.detached(priority: .utility) {
+                BackupStaging.sweepOrphans(before: launched)
+                ClipboardExports.sweep()
+            }
             updateChecker.onUpdateAvailable = { [weak self] in self?.updateCoordinator.offer($0) }
             updateCoordinator.applyAutomaticChecking()
             supportReminders.onDue = { [weak self] in self?.supportCoordinator.presentIfDue() }
@@ -578,27 +581,29 @@ final class AppCore {
     func applyClipboardTextSearch() {
         guard settings.clipboardEnabled, settings.clipboardTextSearchEnabled else {
             clipboardStore.onItemsChanged = nil
-            clipboardStore.onSearchResultsChanged = nil
             clipboardStore.setTextSearchEnabled(false)
             clipboardTextIndexer?.stop()
             return
         }
+        // The history opens once its key arrives, and applies this again when it does.
+        guard clipboardStore.isOpen else { return }
         guard clipboardStore.setTextSearchEnabled(true) else {
             showMessage(
                 String(localized: "Couldn't enable text recognition for clipboard history."),
                 tone: .danger)
             return
         }
-        clipboardStore.setTextSearchActive(palette.isVisible)
+        clipboardStore.setSearchActive(palette.isVisible)
         // Kept across a disable: the indexer reschedules itself once a cancelled run winds down.
         let indexer =
             clipboardTextIndexer
-            ?? ClipboardTextIndexer(store: clipboardStore, canRun: { ClipboardTextIndexer.isSystemIdle })
+            ?? ClipboardTextIndexer(
+                store: clipboardStore, canRun: { ClipboardTextIndexer.isSystemIdle },
+                extract: { [key = clipboardStore.cipher?.blobKey] item in
+                    try await ClipboardTextWorker.extract(item, imageKey: key)
+                })
         clipboardTextIndexer = indexer
         clipboardStore.onItemsChanged = { [weak indexer] in indexer?.schedule() }
-        clipboardStore.onSearchResultsChanged = { [weak self] query, previous, current in
-            self?.clipboardCoordinator.followSearchResults(query: query, previous: previous, current: current)
-        }
         indexer.start()
     }
 

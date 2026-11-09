@@ -18,7 +18,7 @@ final class ClipboardTextIndexer {
     init(
         store: ClipboardStore, delay: Duration = .milliseconds(250), retryDelay: TimeInterval = 30,
         canRun: @escaping () -> Bool,
-        extract: @escaping @Sendable (ClipboardItem) async throws -> String = ClipboardTextWorker.extract
+        extract: @escaping @Sendable (ClipboardItem) async throws -> String
     ) {
         self.store = store
         self.delay = delay

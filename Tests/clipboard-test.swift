@@ -1,5 +1,7 @@
 // Standalone test for the clipboard store, compiling the real source rather than a copy.
+import CryptoKit
 import Foundation
+import SQLite3
 
 @main
 @MainActor
@@ -12,10 +14,11 @@ struct ClipboardTests {
         unpinRejoinsAsNewest()
         pasteLeavesPinsAlone()
         try editRewritesInPlace()
-        try editReachesPastTheMemoryWindow()
+        try await editReachesPastTheMemoryWindow()
         editHonoursTheCaptureLimit()
         pinsSurvivePruningAndTheWindow()
-        pinsLeadFilteredSearches()
+        await pinsLeadFilteredSearches()
+        termsAreAllRequiredInAnyOrder()
         pinnedSlotResolutionUsesVisiblePins()
         landingSkipsThePins()
         textFormClassification()
@@ -26,13 +29,19 @@ struct ClipboardTests {
         typeFilterSplitsTheHistory()
         typeFilterJoinsTheSearchMemo()
         persistence()
+        anotherKeyOpensAnEmptyHistory()
+        legacyDatabasesAreDiscarded()
         exportSeesPastTheMemoryWindow()
         importedImagesArriveOnce()
+        importedImagesAreSealedCopies()
         imageCopiesLeaveWithTheirBlob()
         orphanedCopiesAreSweptOnLoad()
+        try await unsealedLeftoversAreSweptOnLoad()
         try await retiredImageCapturesStayRetired()
+        try await nothingReachesDiskInPlaintext()
         multiFileCopyMakesOneRowEach()
-        fileBatchesRespectTheMemoryWindow()
+        await fileBatchesRespectTheMemoryWindow()
+        await rowsBelowAShrunkWindowStayFindable()
         referencedFilesOutliveTheirRows()
         filePathsAreNeverATextForm()
         fileEntriesAreFoundByNameAndFolder()
@@ -52,14 +61,14 @@ struct ClipboardTests {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("clipboard-capture-test-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: directory) }
-        let store = ClipboardStore(directory: directory)
+        let store = ClipboardStore(directory: directory, cipher: .harness)
         let data = Data("captured image".utf8)
         let beforeClear = store.captureGeneration
         store.clearAll()
         store.addImage(data, sourceBundleID: nil, capture: beforeClear)
         let beforeClose = store.captureGeneration
         store.close()
-        store.open()
+        store.open(cipher: .harness)
         store.addImage(data, sourceBundleID: nil, capture: beforeClose)
         expect(store.items.isEmpty, "a capture retired during conversion never reaches history")
         let images = directory.appendingPathComponent("images")
@@ -76,7 +85,10 @@ struct ClipboardTests {
             try await Task.sleep(for: .milliseconds(10))
         }
         expect(store.items.count == 1, "a fresh capture succeeds after retiring an in-flight write")
-        let reopened = ClipboardStore(directory: directory)
+        expect(
+            store.items.first.flatMap { store.imageData(for: $0) } == data,
+            "the surviving capture opens to the bytes that were copied")
+        let reopened = ClipboardStore(directory: directory, cipher: .harness)
         reopened.load()
         expect(reopened.items.count == 1, "only the fresh capture is persisted")
     }
@@ -167,7 +179,7 @@ struct ClipboardTests {
             _ = try store.updateText("pinned final", of: item(store, "pinned draft"))
             expect(item(store, "pinned final").isPinned, "an edit keeps the pin")
 
-            let reopened = ClipboardStore(directory: dir)
+            let reopened = ClipboardStore(directory: dir, cipher: .harness)
             reopened.load()
             expect(
                 texts(reopened) == ["pinned final", "newest", "final copy"],
@@ -202,26 +214,32 @@ struct ClipboardTests {
     }
 
     /// A row found past the resident window has nowhere in memory to change, so the memo must.
-    static func editReachesPastTheMemoryWindow() throws {
-        try withStore { store, _ in
+    static func editReachesPastTheMemoryWindow() async throws {
+        try await withAsyncStore { store, _ in
             let total = 1_200
             store.importEntries(
                 (0..<total).map {
                     ClipboardItem(
-                        id: UUID(), kind: .text, text: "entry \($0)", imagePath: nil,
+                        id: UUID(), kind: .text, text: $0 == 0 ? "the oldest entry" : "entry \($0)",
+                        imagePath: nil,
                         createdAt: Date().addingTimeInterval(TimeInterval($0 - total)),
                         sourceBundleID: nil)
                 })
-            guard let oldest = store.search("entry 0", filter: .all).first else {
+            expect(store.search("oldest", filter: .all).isEmpty, "the window alone cannot answer")
+            guard let oldest = await settledSearch(store, "oldest").first else {
                 return fail("the oldest entry is found past the window")
             }
             expect(!store.items.contains { $0.id == oldest.id }, "the oldest entry is not resident")
 
-            _ = try store.updateText("renamed oldest", of: oldest)
-            expect(store.search("entry 0", filter: .all).isEmpty, "the memo drops the old text")
+            _ = try store.updateText("renamed first", of: oldest)
+            expect(store.search("oldest", filter: .all).isEmpty, "the memo drops the old text")
+            expect(await settledSearch(store, "oldest").isEmpty, "and the scan cannot find it either")
             expect(
-                store.search("renamed", filter: .all).map(\.id) == [oldest.id],
+                await settledSearch(store, "renamed").map(\.id) == [oldest.id],
                 "and search answers with the edit")
+            expect(
+                await settledSearch(store, "renamed").first?.text == "renamed first",
+                "carrying the edited text rather than the old")
         }
     }
 
@@ -244,7 +262,7 @@ struct ClipboardTests {
                 "pruning skips pinned rows and takes the rest")
 
             // Reopen: the pin must come back even though it is far outside the retention window.
-            let reopened = ClipboardStore(directory: dir)
+            let reopened = ClipboardStore(directory: dir, cipher: .harness)
             reopened.maxAge = 86_400
             reopened.load()
             expect(
@@ -253,12 +271,12 @@ struct ClipboardTests {
         }
     }
 
-    /// A pin must lead a filtered search even when the FTS statement's LIMIT cannot reach it.
-    static func pinsLeadFilteredSearches() {
-        withStore { store, _ in
+    /// A pin must lead a search even when the 200-row budget cannot reach it.
+    static func pinsLeadFilteredSearches() async {
+        await withAsyncStore { store, _ in
             var seed: [ClipboardItem] = []
             let base = Date().addingTimeInterval(-10_000)
-            // The pinned hit is the oldest of 260 matches; the FTS statement stops at 200.
+            // The pinned hit is the oldest of 260 matches; the unpinned budget stops at 200.
             seed.append(entry("needle in the haystack", at: base))
             for i in 1...259 {
                 seed.append(entry("haystack filler \(i)", at: base.addingTimeInterval(Double(i))))
@@ -266,19 +284,45 @@ struct ClipboardTests {
             _ = store.importEntries(seed)
             store.togglePinned(item(store, "needle in the haystack"))
 
-            let results = store.search("haystack", filter: .all)
-            expect(results.count > 200, "FTS results plus the pinned block")
-            expect(
-                results.first?.text == "needle in the haystack",
-                "the pinned match leads the filtered results")
-            expect(
-                results.filter(\.isPinned).count == 1, "the pinned row is not duplicated")
+            for (results, path) in [
+                (store.search("haystack", filter: .all), "immediate"),
+                (await settledSearch(store, "haystack"), "settled")
+            ] {
+                expect(results.count == 201, "\(path): the budget plus the pinned block")
+                expect(
+                    results.first?.text == "needle in the haystack",
+                    "\(path): the pinned match leads the results")
+                expect(
+                    results.filter(\.isPinned).count == 1, "\(path): the pinned row is not duplicated")
+                expect(
+                    results.dropFirst().first?.text == "haystack filler 259",
+                    "\(path): the budget keeps the newest matches")
+            }
 
-            // Below the trigram threshold: the fallback path.
+            // Under three characters: the window and pins alone.
             let short = store.search("ne", filter: .all)
             expect(
                 short.first?.text == "needle in the haystack",
-                "the pinned match leads the fallback search too")
+                "the pinned match leads the short-query search too")
+            expect(!store.isSearching, "and a short query with text search off starts no scan")
+        }
+    }
+
+    /// Whitespace splits terms; each is required, in any order, as a folded substring.
+    static func termsAreAllRequiredInAnyOrder() {
+        withStore { store, _ in
+            store.addText("Alpha beta gamma", sourceBundleID: nil)
+            store.addText("Crème brûlée recipe", sourceBundleID: nil)
+            store.addText("say \"yes\" twice", sourceBundleID: nil)
+            store.addText("say yes once", sourceBundleID: nil)
+            let found: (String) -> [String] = { store.search($0, filter: .all).compactMap(\.text) }
+            expect(found("gamma alpha") == ["Alpha beta gamma"], "terms match in any order")
+            expect(found("alpha delta").isEmpty, "every term is required")
+            expect(found("  BETA   gam  ") == ["Alpha beta gamma"], "case and padding are ignored")
+            expect(found("creme brulee") == ["Crème brûlée recipe"], "diacritics fold away")
+            expect(found("\"yes\"") == ["say \"yes\" twice"], "quotes are literal characters")
+            expect(found("say yes") == ["say yes once", "say \"yes\" twice"], "not a phrase")
+            expect(found("eta amm") == ["Alpha beta gamma"], "terms are substrings, not words")
         }
     }
 
@@ -645,7 +689,7 @@ struct ClipboardTests {
             store.togglePinned(item(store, "third"))
             store.togglePinned(item(store, "first"))
 
-            let reopened = ClipboardStore(directory: dir)
+            let reopened = ClipboardStore(directory: dir, cipher: .harness)
             reopened.load()
             expect(
                 texts(reopened) == ["third", "first", "second"],
@@ -657,9 +701,164 @@ struct ClipboardTests {
             reopened.clearAll()
             expect(texts(reopened) == ["first"], "Clear History spares the pin")
 
-            let afterClear = ClipboardStore(directory: dir)
+            let afterClear = ClipboardStore(directory: dir, cipher: .harness)
             afterClear.load()
             expect(texts(afterClear) == ["first"], "and the unpinned rows are gone from disk")
+        }
+    }
+
+    /// The canary is sealed under the key, so a history written under another one opens empty.
+    static func anotherKeyOpensAnEmptyHistory() {
+        withStore { store, dir in
+            store.addText("written under the first key", sourceBundleID: "com.example.first")
+            store.close()
+
+            let foreign = ClipboardStore(directory: dir, cipher: .other)
+            expect(foreign.isOpen, "another key still opens the store")
+            foreign.load()
+            expect(foreign.items.isEmpty, "but reads none of the history the first key wrote")
+            foreign.addText("written under the second key", sourceBundleID: nil)
+            expect(texts(foreign) == ["written under the second key"], "and records afresh")
+            foreign.close()
+
+            let original = ClipboardStore(directory: dir, cipher: .harness)
+            original.load()
+            expect(
+                original.items.isEmpty,
+                "the first key's history was discarded, not hidden, and a third open discards again")
+        }
+    }
+
+    /// A plaintext history from before encryption is discarded on open, never read or kept.
+    static func legacyDatabasesAreDiscarded() {
+        for version in [0, 1] {
+            let dir = scratchDirectory()
+            defer { try? FileManager.default.removeItem(at: dir) }
+            let marker = "legacy-plaintext-\(UUID().uuidString)"
+            let dbURL = dir.appendingPathComponent("clipboard.sqlite3")
+            var db: OpaquePointer?
+            sqlite3_open(dbURL.path, &db)
+            let created = sqlite3_exec(
+                db,
+                """
+                CREATE TABLE items(
+                  id TEXT NOT NULL UNIQUE, kind TEXT NOT NULL, text TEXT, image_path TEXT,
+                  created_at REAL NOT NULL, source_app TEXT, pinned_at REAL);
+                INSERT INTO items VALUES('\(UUID().uuidString)', 'text', '\(marker)', NULL,
+                  \(Date().timeIntervalSince1970), 'com.example.legacy', 1);
+                PRAGMA user_version = \(version);
+                """, nil, nil, nil)
+            sqlite3_exec(
+                db, "CREATE VIRTUAL TABLE items_fts USING fts5(text, tokenize='trigram')", nil, nil,
+                nil)
+            sqlite3_close(db)
+            guard created == SQLITE_OK, fileHolds(dbURL, marker) else {
+                fail("the v\(version) fixture holds its plaintext")
+                continue
+            }
+
+            let store = ClipboardStore(directory: dir, cipher: .harness)
+            store.load()
+            expect(store.isOpen, "a v\(version) history still leaves the store open")
+            expect(store.items.isEmpty, "but none of its rows, not even a pin, is read")
+            expect(
+                intValue(dbURL, "PRAGMA user_version") == Int64(ClipboardStore.schemaVersion),
+                "the v\(version) file is replaced by the current schema")
+            expect(
+                intValue(dbURL, "SELECT COUNT(*) FROM sqlite_master WHERE name LIKE '%fts%'") == 0,
+                "which carries no full-text index")
+            expect(
+                !databaseFiles(dbURL).contains { fileHolds($0, marker) },
+                "and none of the v\(version) plaintext survives in the database files")
+            store.addText("fresh", sourceBundleID: nil)
+            expect(texts(store) == ["fresh"], "the replaced store records afresh")
+        }
+    }
+
+    /// Plaintext an older build left in `images/`, and a dead run's partial write, go on load.
+    static func unsealedLeftoversAreSweptOnLoad() async throws {
+        try await withAsyncStore { store, _ in
+            let images = store.imagesDir
+            let legacy = images.appendingPathComponent("legacy.png")
+            let stale = images.appendingPathComponent(".a.sealed.\(UUID().uuidString).partial")
+            let fresh = images.appendingPathComponent(".b.sealed.\(UUID().uuidString).partial")
+            let sealed = images.appendingPathComponent("kept.\(SealedFile.fileExtension)")
+            try Data("plaintext png".utf8).write(to: legacy)
+            try Data("half".utf8).write(to: stale)
+            try FileManager.default.setAttributes(
+                [.modificationDate: Date().addingTimeInterval(-3_600)], ofItemAtPath: stale.path)
+            try Data("half".utf8).write(to: fresh)
+            try SealedFile.write(Data("png".utf8), to: sealed, key: ClipboardCipher.harness.blobKey)
+
+            store.load()
+            let exists = { (url: URL) in FileManager.default.fileExists(atPath: url.path) }
+            let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+            while exists(legacy) || exists(stale), ContinuousClock.now < deadline {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            expect(!exists(legacy), "a plaintext leftover in images/ is deleted on load")
+            expect(!exists(stale), "as is a partial write older than any write takes")
+            expect(exists(fresh), "a partial write still in flight is left to finish")
+            expect(exists(sealed), "and a sealed blob is kept")
+        }
+    }
+
+    /// Every value and blob is sealed: no marker survives in the database, its WAL or images/.
+    static func nothingReachesDiskInPlaintext() async throws {
+        try await withAsyncStore { store, _ in
+            let tag = UUID().uuidString
+            let text = "leak-text-\(tag)"
+            let source = "com.leak-source.\(tag)"
+            let recognized = "leak-ocr-\(tag)"
+            let path = "/Users/me/leak-path-\(tag).pdf"
+            let imageMarker = "leak-image-\(tag)"
+            // Past one 64 KiB segment, so a multi-segment seal is covered too.
+            let imageBytes = Data(String(repeating: imageMarker, count: 2_000).utf8)
+            store.addText(text, sourceBundleID: source)
+            store.addFiles([path], sourceBundleID: source)
+            store.addImage(imageBytes, sourceBundleID: source, capture: store.captureGeneration)
+            let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+            while !store.items.contains(where: { $0.kind == .image }), ContinuousClock.now < deadline {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            guard let image = store.items.first(where: { $0.kind == .image }),
+                let url = store.imageURL(for: image), let key = store.imageKey(for: image)
+            else { return fail("the marker image is captured") }
+            expect(url.pathExtension == SealedFile.fileExtension, "a capture is written sealed")
+            expect(SealedFile.isSealed(url), "in the sealed format")
+            expect(store.imageData(for: image) == imageBytes, "and opens to the bytes captured")
+            expect(image.sourceBundleID == source, "the source survives its seal")
+            expect(store.setTextSearchEnabled(true), "text search switches on")
+            expect(
+                store.setExtractedText(recognized, for: image, generation: store.extractionGeneration),
+                "the marker's recognized text is stored")
+            // Sealed under the blob key, the way the thumbnail pipeline writes one.
+            let thumbnail = ImageDerivative.all(of: url)[0].url
+            try FileManager.default.createDirectory(
+                at: thumbnail.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try SealedFile.write(imageBytes, to: thumbnail, key: key)
+            expect(store.search(text, filter: .all).count == 1, "the marker text is searchable")
+            expect(
+                await settledSearch(store, recognized).map(\.id) == [image.id],
+                "and so is the marker's recognized text")
+
+            let markers = [text, source, recognized, path, imageMarker]
+            for phase in ["open", "closed"] {
+                if phase == "closed" { store.close() }
+                let files = databaseFiles(store.dbURL) + regularFiles(under: store.imagesDir)
+                let scanned = Set(files.map { $0.resolvingSymlinksInPath().path })
+                let wasScanned = { (url: URL) in scanned.contains(url.resolvingSymlinksInPath().path) }
+                expect(wasScanned(store.dbURL), "\(phase): the database is scanned")
+                expect(
+                    phase == "closed" || files.contains { $0.path.hasSuffix("-wal") },
+                    "\(phase): and its write-ahead log")
+                expect(wasScanned(url), "\(phase): and the sealed capture")
+                expect(wasScanned(thumbnail), "\(phase): and its thumbnail")
+                let leaks = files.flatMap { file in
+                    markers.filter { fileHolds(file, $0) }.map { "\(file.lastPathComponent): \($0)" }
+                }
+                expect(leaks.isEmpty, "\(phase): no marker reaches disk in plaintext \(leaks)")
+            }
         }
     }
 
@@ -678,12 +877,22 @@ struct ClipboardTests {
 
             var streamed = 0
             var seen = Set<String>()
-            ClipboardStore.forEachStoredItem(inDatabaseAt: store.dbURL) { item in
+            let unreadable = ClipboardStore.forEachStoredItem(
+                inDatabaseAt: store.dbURL, cipher: .harness
+            ) { item in
                 streamed += 1
                 if let text = item.text { seen.insert(text) }
             }
             expect(streamed == total, "the export streams every row, not just the window")
             expect(seen.count == total, "every row arrives exactly once")
+            expect(unreadable == 0, "and every row opens under the store's own key")
+
+            var foreign = 0
+            let refused = ClipboardStore.forEachStoredItem(
+                inDatabaseAt: store.dbURL, cipher: .other
+            ) { _ in foreign += 1 }
+            expect(foreign == 0, "another key reads no row back")
+            expect(refused == total, "and counts every row as unreadable rather than empty")
         }
     }
 
@@ -696,12 +905,20 @@ struct ClipboardTests {
                     imagePath: blob.path, createdAt: Date().addingTimeInterval(-2 * 86_400),
                     sourceBundleID: nil)
                 ClipboardStore.importStoredItems(
-                    inDatabaseAt: store.dbURL, adoptingImagesInto: store.imagesDir, [staged])
+                    inDatabaseAt: store.dbURL, adoptingImagesInto: store.imagesDir,
+                    cipher: .harness, [staged])
                 store.load()
                 guard let item = store.items.first, let url = store.imageURL(for: item) else {
                     return expect(false, "the adopted image is listed")
                 }
                 expect(store.ownsImage(of: item), "an adopted blob is ours to derive from")
+                expect(
+                    url == store.imagesDir
+                        .appendingPathComponent(ClipboardStore.sealedName(forOriginal: blob.path)),
+                    "the adopted blob is a sealed copy named after the staged file")
+                expect(
+                    FileManager.default.fileExists(atPath: blob.path),
+                    "adoption copies the staged file rather than moving it")
                 let copies = ImageDerivative.all(of: url).map(\.url)
                 try? FileManager.default.createDirectory(
                     at: ImageDerivative.folder(beside: url), withIntermediateDirectories: true)
@@ -714,8 +931,9 @@ struct ClipboardTests {
                     store.maxAge = 86_400
                     store.enforceLimits()
                 }
+                let leftovers = copies + [url]
                 let deadline = Date().addingTimeInterval(2)
-                while copies.contains(where: { FileManager.default.fileExists(atPath: $0.path) }),
+                while leftovers.contains(where: { FileManager.default.fileExists(atPath: $0.path) }),
                     Date() < deadline
                 {
                     RunLoop.current.run(until: Date().addingTimeInterval(0.01))
@@ -723,6 +941,7 @@ struct ClipboardTests {
                 expect(
                     !copies.contains { FileManager.default.fileExists(atPath: $0.path) },
                     "\(way) deletes the copies")
+                expect(!FileManager.default.fileExists(atPath: url.path), "\(way) deletes the blob")
             }
         }
     }
@@ -733,10 +952,14 @@ struct ClipboardTests {
             let blob = dir.appendingPathComponent("kept.png")
             try? Data("png".utf8).write(to: blob)
             ClipboardStore.importStoredItems(
-                inDatabaseAt: store.dbURL, adoptingImagesInto: store.imagesDir,
+                inDatabaseAt: store.dbURL, adoptingImagesInto: store.imagesDir, cipher: .harness,
                 [ClipboardItem(imagePath: blob.path, sourceBundleID: nil)])
-            let kept = ImageDerivative.all(of: store.imagesDir.appendingPathComponent("kept.png")).map(\.url)
-            let gone = store.imagesDir.appendingPathComponent("gone.png")
+            let kept = ImageDerivative.all(
+                of: store.imagesDir
+                    .appendingPathComponent(ClipboardStore.sealedName(forOriginal: blob.path))
+            ).map(\.url)
+            let gone = store.imagesDir
+                .appendingPathComponent(ClipboardStore.sealedName(forOriginal: "gone.png"))
             let orphans = ImageDerivative.all(of: gone).map(\.url)
             try? FileManager.default.createDirectory(
                 at: ImageDerivative.folder(beside: kept[0]), withIntermediateDirectories: true)
@@ -760,18 +983,69 @@ struct ClipboardTests {
             try? FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
             let blob = staging.appendingPathComponent("blob.png")
             let staged = ClipboardItem(imagePath: blob.path, sourceBundleID: nil)
+            let missing = ClipboardItem(
+                imagePath: staging.appendingPathComponent("missing.png").path, sourceBundleID: nil)
 
             for pass in 1...2 {
                 try? Data("png".utf8).write(to: blob)
                 let inserted = ClipboardStore.importStoredItems(
-                    inDatabaseAt: store.dbURL, adoptingImagesInto: store.imagesDir, [staged])
+                    inDatabaseAt: store.dbURL, adoptingImagesInto: store.imagesDir,
+                    cipher: .harness, [staged, missing])
                 expect(inserted == (pass == 1 ? 1 : 0), "pass \(pass) inserts \(2 - pass) row(s)")
             }
             store.load()
-            expect(store.items.count == 1, "the second import adds no row")
+            expect(store.items.count == 1, "the second import adds no row, nor a missing image's")
             let images =
                 (try? FileManager.default.contentsOfDirectory(atPath: store.imagesDir.path)) ?? []
-            expect(images == ["blob.png"], "and no second copy of the blob")
+            expect(images == ["blob.png.sealed"], "and no second copy of the blob")
+            expect(
+                store.items.first.flatMap { store.imageData(for: $0) } == Data("png".utf8),
+                "the sealed copy opens to the staged bytes")
+            expect(
+                store.items.first.flatMap { store.imageKey(for: $0) } != nil,
+                "and hands the thumbnail pipeline its key")
+        }
+    }
+
+    /// An import from Raycast or a backup no longer references images where they lie.
+    static func importedImagesAreSealedCopies() {
+        withStore { store, dir in
+            let elsewhere = dir.appendingPathComponent("Elsewhere", isDirectory: true)
+            try? FileManager.default.createDirectory(at: elsewhere, withIntermediateDirectories: true)
+            let original = elsewhere.appendingPathComponent("photo.jpeg")
+            let bytes = Data("jpeg bytes \(UUID().uuidString)".utf8)
+            try? bytes.write(to: original)
+            let staged = ClipboardItem(
+                id: UUID(), kind: .image, text: nil, imagePath: original.path, createdAt: Date(),
+                sourceBundleID: nil, pinnedAt: Date())
+            expect(store.importEntries([staged]) == 1, "the image imports")
+            guard let adopted = store.items.first else { return fail("the import is listed") }
+            expect(store.ownsImage(of: adopted), "the store owns what it imported")
+            expect(adopted.isPinned, "and the pin travels with the copy")
+            expect(
+                adopted.imagePath
+                    == store.imagesDir
+                    .appendingPathComponent(ClipboardStore.sealedName(forOriginal: original.path)).path,
+                "the copy is named after the original")
+            expect(store.imageData(for: adopted) == bytes, "and opens to the original's bytes")
+            expect(
+                FileManager.default.contents(atPath: original.path) == bytes,
+                "the original is left untouched")
+            store.remove(adopted)
+            let deadline = Date().addingTimeInterval(2)
+            while adopted.imagePath.map(FileManager.default.fileExists) == true, Date() < deadline {
+                RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+            }
+            expect(
+                FileManager.default.fileExists(atPath: original.path),
+                "removing the row deletes only the store's copy")
+            expect(store.importEntries([staged]) == 1, "and a removed import can come back")
+
+            let unowned = ClipboardItem(imagePath: original.path, sourceBundleID: nil)
+            expect(store.imageKey(for: unowned) == nil, "an unowned image is handed no key")
+            expect(
+                store.imageData(for: unowned) == bytes,
+                "and an unowned image's bytes are read as they lie")
         }
     }
 
@@ -788,8 +1062,8 @@ struct ClipboardTests {
         }
     }
 
-    static func fileBatchesRespectTheMemoryWindow() {
-        withStore { store, _ in
+    static func fileBatchesRespectTheMemoryWindow() async {
+        await withAsyncStore { store, _ in
             for index in 0..<1000 { store.addText("entry \(index)", sourceBundleID: nil) }
             let pinned = item(store, "entry 0")
             store.togglePinned(pinned)
@@ -809,9 +1083,40 @@ struct ClipboardTests {
             expect(
                 store.items.last(where: { !$0.isPinned })?.text == "entry 97",
                 "trimming removes the oldest unpinned rows")
-            expect(
-                store.search("entry 1", filter: .text).contains { $0.text == "entry 1" },
-                "trimmed rows remain searchable on disk")
+            // 96 sits just past the last resident row, and 50 well below it.
+            for trimmed in ["entry 50", "entry 96"] {
+                expect(
+                    !store.items.contains { $0.text == trimmed }, "\(trimmed) is no longer resident")
+                expect(
+                    await settledSearch(store, trimmed, filter: .text).contains { $0.text == trimmed },
+                    "trimmed \(trimmed) remains searchable on disk")
+            }
+        }
+    }
+
+    /// A delete or a pin shrinks the resident window by a row, which the scan must still read.
+    static func rowsBelowAShrunkWindowStayFindable() async {
+        for way in ["removing", "pinning"] {
+            await withAsyncStore { store, _ in
+                let total = 1_001
+                store.importEntries(
+                    (0..<total).map {
+                        entry(
+                            $0 == 0 ? "boundary marker" : "row \($0)",
+                            at: Date().addingTimeInterval(TimeInterval($0 - total)))
+                    })
+                expect(
+                    !store.items.contains { $0.text == "boundary marker" },
+                    "\(way): the oldest row starts past the window")
+                expect(
+                    await settledSearch(store, "boundary").count == 1,
+                    "\(way): and the scan finds it there")
+                let resident = item(store, "row 500")
+                if way == "removing" { store.remove(resident) } else { store.togglePinned(resident) }
+                expect(
+                    await settledSearch(store, "boundary").count == 1,
+                    "\(way): it is still found once the window holds one row fewer")
+            }
         }
     }
 
@@ -854,13 +1159,14 @@ struct ClipboardTests {
         expect(ClipboardFilter.file.matches(item), "only Files Only does")
     }
 
-    /// The path lives in `text`, so the trigram index finds a file by name or by folder.
+    /// The path lives in `text`, so search finds a file by name or by folder.
     static func fileEntriesAreFoundByNameAndFolder() {
         withStore { store, _ in
             store.addFiles(["/Users/me/Downloads/Quarterly Report.pdf"], sourceBundleID: nil)
-            expect(store.search("report", filter: .all).count == 1, "FTS finds it by name")
+            expect(store.search("report", filter: .all).count == 1, "search finds it by name")
             expect(store.search("downloads", filter: .all).count == 1, "and by folder")
-            expect(store.search("re", filter: .all).count == 1, "the sub-trigram fallback too")
+            expect(store.search("report downloads", filter: .all).count == 1, "and by both at once")
+            expect(store.search("re", filter: .all).count == 1, "a short query finds it too")
         }
     }
 
@@ -953,7 +1259,56 @@ struct ClipboardTests {
     static func withStore(_ body: (ClipboardStore, URL) throws -> Void) rethrows {
         let dir = scratchDirectory()
         defer { try? FileManager.default.removeItem(at: dir) }
-        try body(ClipboardStore(directory: dir), dir)
+        try body(ClipboardStore(directory: dir, cipher: .harness), dir)
+    }
+
+    static func withAsyncStore(_ body: (ClipboardStore, URL) async throws -> Void) async rethrows {
+        let dir = scratchDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try await body(ClipboardStore(directory: dir, cipher: .harness), dir)
+    }
+
+    /// The answer once the off-main scan has published, which is what a deep match waits for.
+    static func settledSearch(
+        _ store: ClipboardStore, _ query: String, filter: ClipboardFilter = .all
+    ) async -> [ClipboardItem] {
+        _ = store.search(query, filter: filter)
+        await store.searchSettled()
+        return store.search(query, filter: filter)
+    }
+
+    static func databaseFiles(_ url: URL) -> [URL] {
+        ["", "-wal", "-shm"].map { URL(fileURLWithPath: url.path + $0) }
+            .filter { FileManager.default.fileExists(atPath: $0.path) }
+    }
+
+    /// Hidden folders included, so `.thumbnails` is read with everything else.
+    static func regularFiles(under directory: URL) -> [URL] {
+        let enumerator = FileManager.default.enumerator(
+            at: directory, includingPropertiesForKeys: [.isRegularFileKey])
+        var files: [URL] = []
+        while let url = enumerator?.nextObject() as? URL {
+            if (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true {
+                files.append(url)
+            }
+        }
+        return files
+    }
+
+    static func fileHolds(_ url: URL, _ marker: String) -> Bool {
+        guard let data = FileManager.default.contents(atPath: url.path) else { return false }
+        return data.range(of: Data(marker.utf8)) != nil
+    }
+
+    static func intValue(_ url: URL, _ sql: String) -> Int64? {
+        var db: OpaquePointer?
+        defer { sqlite3_close(db) }
+        var stmt: OpaquePointer?
+        guard sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK,
+            sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK
+        else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        return sqlite3_step(stmt) == SQLITE_ROW ? sqlite3_column_int64(stmt, 0) : nil
     }
 
     static func scratchDirectory() -> URL {
@@ -998,4 +1353,10 @@ struct ClipboardTests {
         print("FAIL: \(label)")
         failures += 1
     }
+}
+
+extension ClipboardCipher {
+    static let harness = ClipboardCipher(rootKey: SymmetricKey(size: .bits256))
+    /// A second Keychain key, as a restored or reset Keychain would hand the store.
+    static let other = ClipboardCipher(rootKey: SymmetricKey(size: .bits256))
 }

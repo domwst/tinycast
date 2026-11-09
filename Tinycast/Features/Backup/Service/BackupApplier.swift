@@ -24,8 +24,13 @@ enum BackupApplier {
             summary.settings = backup.apply(to: core)
         }
         if categories.contains(.clipboard) {
-            summary.clipboard = await importClipboard(bundle, into: core.clipboardStore)
-            if summary.clipboard > 0 { core.clipboardStore.load() }
+            if await core.clipboardCoordinator.openForWrite(), let cipher = core.clipboardStore.cipher {
+                summary.clipboard = await importClipboard(bundle, into: core.clipboardStore, cipher: cipher)
+                if summary.clipboard > 0, core.settings.clipboardEnabled { core.clipboardStore.load() }
+                core.clipboardCoordinator.closeIfDisabled()
+            } else {
+                summary.problems.append(ClipboardKeyStore.Failure.locked.localizedDescription)
+            }
         }
         if categories.contains(.snippets) {
             do {
@@ -50,10 +55,10 @@ enum BackupApplier {
 
     /// Off-main and streamed: a restored history runs to hundreds of thousands of clips.
     private nonisolated static func importClipboard(
-        _ bundle: BackupBundle, into store: ClipboardStore
+        _ bundle: BackupBundle, into store: ClipboardStore, cipher: ClipboardCipher
     ) async -> Int {
         ClipboardStore.importStoredItems(
-            inDatabaseAt: store.dbURL, adoptingImagesInto: store.imagesDir,
+            inDatabaseAt: store.dbURL, adoptingImagesInto: store.imagesDir, cipher: cipher,
             bundle.clipboardItems().lazy.compactMap { staged($0, in: bundle) })
     }
 

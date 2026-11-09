@@ -150,6 +150,7 @@ final class ClipboardManager {
         lastChangeCount = generation
 
         if pb.types?.contains(Self.internalType) == true { return }
+        ClipboardExports.discardPasteboardCopies()
 
         // Never record secrets: skip copies tagged sensitive by any of the marker owners.
         if let types = pb.types, !Set(types).isDisjoint(with: Self.sensitiveTypes) { return }

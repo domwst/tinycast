@@ -31,3 +31,4 @@ When the check fails, delete everything the row lists, then the row.
 
 | Migration | Repairs | Delete with it |
 | --- | --- | --- |
+| `ClipboardEncryptionMigration` | Seals a plaintext `clipboard.sqlite3` (v1, with FTS) and its PNGs and thumbnails into the v2 store. Called from `ClipboardKeyStore.unlock`, the one point before the store opens, which `ClipboardCoordinator.applyEnabled` reaches at launch with the feature on or off | `Tinycast/Migrations/ClipboardEncryptionMigration.swift`, `Tests/clipboard-encryption-migration-test.swift`, its `run-tests.sh` line and `testing.md` row, and the `unlock` call |

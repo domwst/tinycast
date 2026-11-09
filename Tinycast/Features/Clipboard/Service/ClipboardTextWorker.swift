@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// Runs one `ClipboardTextHelper` per item, so Vision's allocations leave with the child process.
@@ -13,22 +14,48 @@ nonisolated enum ClipboardTextWorker {
     static let executable = Bundle.main.bundleURL.appendingPathComponent(
         "Contents/Helpers/ClipboardTextHelper")
 
-    static func extract(_ item: ClipboardItem) async throws -> String {
+    /// `imageKey` unseals a blob the store owns; a referenced file is read where it lies.
+    static func extract(_ item: ClipboardItem, imageKey: SymmetricKey?) async throws -> String {
         guard let path = item.imagePath ?? item.filePath else { return "" }
         let kind = item.kind == .image ? ClipboardFileKind.image : ClipboardFileKind.of(path: path)
         guard kind == .image || kind == .pdf else { return "" }
-        return try await extract(at: URL(fileURLWithPath: path), isPDF: kind == .pdf, executable: executable)
+        let url = URL(fileURLWithPath: path)
+        if item.kind == .image, let imageKey, SealedFile.isSealed(url) {
+            return try await extract(sealedImage: url, key: imageKey, executable: executable)
+        }
+        return try await extract(at: url, isPDF: kind == .pdf, executable: executable)
     }
 
     static func extract(
         at url: URL, isPDF: Bool, executable: URL, timeout: Duration = .seconds(60)
     ) async throws -> String {
+        try await run([isPDF ? "pdf" : "image", url.path], input: nil, executable, timeout)
+    }
+
+    /// The plaintext crosses a pipe, so recognition never needs an unsealed copy on disk.
+    static func extract(
+        sealedImage url: URL, key: SymmetricKey, executable: URL, timeout: Duration = .seconds(60)
+    ) async throws -> String {
+        try await run(["image-data"], input: (url, key), executable, timeout)
+    }
+
+    private static func run(
+        _ arguments: [String], input: (url: URL, key: SymmetricKey)?, _ executable: URL,
+        _ timeout: Duration
+    ) async throws -> String {
         try Task.checkCancellation()
         let process = Process()
         let output = Pipe()
+        let stdin = input.map { _ in Pipe() }
+        // A helper that exits mid-write must fail the write, not raise SIGPIPE in the app.
+        if let stdin { _ = fcntl(stdin.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1) }
         process.executableURL = executable
-        process.arguments = [isPDF ? "pdf" : "image", url.path]
-        process.standardInput = FileHandle.nullDevice
+        process.arguments = arguments
+        if let stdin {
+            process.standardInput = stdin
+        } else {
+            process.standardInput = FileHandle.nullDevice
+        }
         process.standardOutput = output
         process.standardError = FileHandle.nullDevice
         process.qualityOfService = .background
@@ -38,6 +65,15 @@ nonisolated enum ClipboardTextWorker {
         let deadline = Task.detached(priority: .background) {
             do { try await Task.sleep(for: timeout) } catch { return }
             terminate(process)
+        }
+        if let stdin, let input {
+            // Unsealed and written apart from the read, so a full stdout pipe never deadlocks it.
+            queue.async {
+                if let data = try? SealedFile.read(input.url, key: input.key) {
+                    try? stdin.fileHandleForWriting.write(contentsOf: data)
+                }
+                try? stdin.fileHandleForWriting.close()
+            }
         }
         let result = await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in

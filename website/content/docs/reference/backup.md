@@ -127,7 +127,7 @@ Everything a backup includes is also a regular file. By default, it's in
 | [Snippets](/docs/features/snippets)           | `Snippets/`, or the **Snippets Folder** you chose |
 | [Notes](/docs/features/notes)                 | `Notes/`, or the **Notes Folder** you chose       |
 | [Quicklinks](/docs/launcher/quicklinks)       | `quicklinks.sqlite3`, with its own JSON export    |
-| [Clipboard history](/docs/features/clipboard) | `clipboard.sqlite3`, with images next to it       |
+| [Clipboard history](/docs/features/clipboard) | `clipboard.sqlite3`, encrypted, with images       |
 | [AI chats](/docs/ai)                          | `ai-chats.sqlite3`, never included in a backup    |
 
 Snippets and notes are plain Markdown files. Copying those folders works as a backup, and you can

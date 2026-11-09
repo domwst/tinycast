@@ -44,8 +44,9 @@ An applications command hides the launched app's path after `::=::` in its id, r
 `Bundle` to a bundle ID — the same resolution the hotkey, favorite and alias mappers all use. Hotkeys
 are `LayoutIndependent` key codes with named modifiers, and always import as a `.combo`: Raycast has no
 double-tap binding. A clipboard record's representations are nested and its timestamps carry fractional
-seconds; only an `image/*` representation whose file still exists becomes an image clip, and the rest
-are counted as missing rather than dropped silently. Quicklinks land through `QuicklinkArchive.merge`,
+seconds; only an `image/*` representation whose file still exists becomes an image clip, sealed into
+Tinycast's own store as a copy while Raycast's file is left as it was, and the rest are counted as
+missing rather than dropped silently. Quicklinks land through `QuicklinkArchive.merge`,
 so they add to the library and never replace it. `{Query}` is rewritten to `{argument}`; an `openWith`
 app path (or a platform id in `openWithPlatforms`) resolves to a bundle ID the same way application
 hotkeys do. Raycast's ULID is discarded — each imported row gets a fresh UUID, as a JSON quicklink
