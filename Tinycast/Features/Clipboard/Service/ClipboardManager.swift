@@ -153,18 +153,15 @@ final class ClipboardManager {
         // Before the marker check: a marked write of ours retires an image's copy just the same.
         ClipboardExports.discardPasteboardCopies(unlessGeneration: generation)
 
-        if pb.types?.contains(Self.internalType) == true { return }
-
-        // Never record secrets: skip copies tagged sensitive by any of the marker owners.
-        if let types = pb.types, !Set(types).isDisjoint(with: Self.sensitiveTypes) { return }
+        if Self.isMarked(pb) { return }
 
         // A menu-bar helper writes while another app is frontmost, so every witness can block.
         let source = source(writer: writer)
         if source.isBlocked(byDisabled: settings.clipboardDisabledApps) { return }
         let sourceBundleID = source.recordedBundleID
 
-        // Reading a promised type runs its writer's code, which can swap the board for a secret.
-        let unchanged = { pb.changeCount == generation }
+        // A promised read runs its writer's code, which may swap the board or mark it secret.
+        let unchanged = { pb.changeCount == generation && !Self.isMarked(pb) }
 
         // Ahead of the text branch: Finder puts the file's *name* on `.string` beside its URL.
         if let paths = Self.fileURLs(on: pb) {
@@ -203,6 +200,12 @@ final class ClipboardManager {
             text.count <= ClipboardStore.maxTextLength, unchanged()
         else { return }
         store.addText(text, sourceBundleID: sourceBundleID)
+    }
+
+    /// Ours, or tagged sensitive by any of the marker owners: never recorded.
+    private static func isMarked(_ pb: NSPasteboard) -> Bool {
+        guard let types = pb.types else { return false }
+        return types.contains(internalType) || !Set(types).isDisjoint(with: sensitiveTypes)
     }
 
     private func source(writer: PasteboardOwnerMonitor.Owner?) -> ClipboardSource {

@@ -138,8 +138,8 @@ copies while Finder or anything else stays frontmost and marks nothing concealed
 3. **The frontmost app**, which was the only witness before and still blocks on its own.
 
 Reading a promised type runs the writer's code, which could replace the board with a concealed
-copy mid-read, so the generation is checked again after the content is read and before it is
-recorded. History records the writer's outermost app, so an Xcode helper reads as Xcode; a writer in no app
+copy mid-read, or add a concealed marker to the same item without moving `changeCount`, so after the
+content is read and before it is recorded both the generation and the markers are checked again. History records the writer's outermost app, so an Xcode helper reads as Xcode; a writer in no app
 bundle, such as `pbcopy`, records the frontmost app as before. Every witness degrades to what
 existed before it: a macOS without the SkyLight symbols, a user `log stream` refuses (it gives up
 after three quick exits), a changed or ambiguous log line, or a process that kills the stream all
@@ -200,10 +200,17 @@ which the export counts as missing rather than dropping quietly.
 
 **A restore streams back the same way.** `importStoredItems(inDatabaseAt:adoptingImagesInto:cipher:_:)`
 is the one insert path a bulk import takes, `importEntries` included: it hashes the existing rows once
-into a dedupe set rather than scanning the table per candidate, holds one transaction, and seals a
-copy of each staged or imported image into `imagesDir` as `<name>.sealed` (so `a.jpg` and `a.png` stay apart) only once the row is known
-to be new. It copies rather than moves, because a Raycast import hands it Raycast's own files; an
-image whose source has gone is left out.
+into a dedupe set rather than scanning the table per candidate, and seals a copy of each staged or
+imported image into `imagesDir` as `<name>.sealed` (so `a.jpg` and `a.png` stay apart) only once
+the row is known to be new. Decoding and sealing happen outside any transaction; each batch of 250
+rows is then inserted under one short `BEGIN IMMEDIATE`, so a delete on the main connection waits
+only on inserts, well inside its two-second busy timeout. It copies rather than moves, because a
+Raycast import hands it Raycast's own files; an image whose source has gone is left out.
+
+**A delete reports what happened.** `remove` and `clearAll` return false when SQLite did not finish
+the delete — another connection held the lock past the timeout — and then leave the list, the
+search results and the blobs untouched, since hiding a row that is still on disk would let the next
+load bring it back. The coordinator says "Clipboard history is busy" instead.
 
 **The load query is deliberately two indexed branches**, not one `pinned_at IS NOT NULL OR rowid >= ?`.
 It fetches every pinned row plus the newest `memoryWindow` unpinned ones, keyed off the floor rowid

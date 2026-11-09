@@ -35,7 +35,9 @@ A backup carries five independently selectable categories, ticked on export and 
   plain LZFSE archive, so a backup written before encryption keeps importing.
 - **Extraction admits only regular files and directories, within a budget.** A FIFO would block it
   forever and a tiny file can expand to fill the disk, so `ExtractionBudget` cancels on any other
-  entry type, past two million entries, or past the space the volume can spare (64 GB at most).
+  entry type, past two million entries, or past the space the volume can spare (64 GB at most;
+  4 MB when only the manifest is previewed). An entry carrying an `XAT` or `ACL` blob is refused
+  outright: a backup never writes one, and a resource fork restored from it would skip the budget.
 - **Extensions, AI chat history, Keychain material and anything in `Caches` never travel.** An
   extension is third-party code and third-party data; chat history and API keys stay on the Mac that
   had them; a cache regenerates on its own.

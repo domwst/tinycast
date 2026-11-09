@@ -38,6 +38,7 @@ struct BackupArchiveTest {
         refusesTraversal(in: root)
         refusesSymbolicLinks(in: root)
         refusesSpecialFiles(in: root)
+        refusesAttachedForks(in: root)
         categoriesAreComplete()
         staging()
         launchSweep()
@@ -378,6 +379,40 @@ struct BackupArchiveTest {
             check(
                 "\(label): an entry naming `..` never lands outside the destination",
                 !FileManager.default.fileExists(atPath: escaped.path))
+        }
+    }
+
+    /// Resource forks and extended attributes skip the byte budget; entries with one are refused.
+    static func refusesAttachedForks(in root: URL) {
+        let source = root.appendingPathComponent("fork-source", isDirectory: true)
+        try? FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        let manifest = source.appendingPathComponent("manifest.json")
+        try? Data("{}".utf8).write(to: manifest)
+        let fork = [UInt8](repeating: 0x41, count: 256 * 1024)
+        let attached = setxattr(manifest.path, "com.apple.ResourceFork", fork, fork.count, 0, 0) == 0
+        check("the fork fixture carries a resource fork", attached)
+        for encrypted in [true, false] {
+            let label = encrypted ? "encrypted" : "legacy"
+            let archive = root.appendingPathComponent("fork-\(label).tinycast")
+            let built = writeFixture(archive, encrypted: encrypted) { encoder in
+                try encoder.writeDirectoryContents(
+                    archiveFrom: FilePath(source.path),
+                    keySet: ArchiveHeader.FieldKeySet("TYP,PAT,DAT,XAT,MOD")!)
+            }
+            check("the \(label) fork fixture can be built", built)
+            for only in [nil, Set(["manifest.json"])] as [Set<String>?] {
+                let into = root.appendingPathComponent("fork-out-\(UUID().uuidString)")
+                let refused: Bool
+                do {
+                    try BackupArchive.open(file: archive, into: into, passphrase: passphrase, only: only)
+                    refused = false
+                } catch {
+                    refused = true
+                }
+                check(
+                    "\(label)\(only == nil ? "" : ", previewing"): an entry with a fork is refused",
+                    refused)
+            }
         }
     }
 

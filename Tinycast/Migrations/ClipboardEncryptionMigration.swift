@@ -12,7 +12,7 @@ nonisolated enum ClipboardEncryptionMigration {
         home: URL = FileManager.default.homeDirectoryForCurrentUser
     ) -> Bool {
         let converting = URL(fileURLWithPath: database.path + ".converting")
-        recoverInterruptedSwap(database: database, images: images)
+        guard recoverInterruptedSwap(database: database, images: images) else { return false }
         switch ClipboardStore.inspect(database) {
         case .unreadable:
             // A file that won't open right now may still be the history: try again next launch.
@@ -40,16 +40,20 @@ nonisolated enum ClipboardEncryptionMigration {
         return true
     }
 
-    /// Finishes a swap a crash interrupted, before anything decides the key it alone can vouch for.
-    static func recoverInterruptedSwap(database: URL, images: URL) {
+    /// Finishes a swap a crash interrupted; false while its copy still waits, so nothing re-keys.
+    @discardableResult
+    static func recoverInterruptedSwap(database: URL, images: URL) -> Bool {
         let converting = URL(fileURLWithPath: database.path + ".converting")
         guard !FileManager.default.fileExists(atPath: database.path),
             FileManager.default.fileExists(atPath: converting.path)
-        else { return }
-        if ClipboardStore.inspect(converting) == .sealed {
-            if rename(converting.path, database.path) == 0 { removePlaintext(in: images) }
-        } else if ClipboardStore.inspect(converting) != .unreadable {
+        else { return true }
+        switch ClipboardStore.inspect(converting) {
+        // Plaintext goes only once `run` finds the store sealed, after its key has vouched for it.
+        case .sealed: return rename(converting.path, database.path) == 0
+        case .unreadable: return false
+        case .absent, .legacy, .discardable:
             ClipboardStore.removeDatabase(at: converting)
+            return true
         }
     }
 
@@ -219,6 +223,8 @@ nonisolated enum ClipboardEncryptionMigration {
     /// Regular files only, in real folders only: a planted link must not aim this at other files.
     private static func plaintextFiles(in images: URL) -> [URL] {
         let thumbnails = images.appending(path: ".thumbnails", directoryHint: .isDirectory)
+        // The parent first: a real `.thumbnails` reached through a linked `images` is not ours.
+        guard ClipboardStore.isRealDirectory(images) else { return [] }
         return [images, thumbnails].filter(ClipboardStore.isRealDirectory).flatMap { folder -> [URL] in
             let names = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
             return names

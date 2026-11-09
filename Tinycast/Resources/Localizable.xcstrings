@@ -35974,6 +35974,58 @@
         }
       }
     },
+    "Clipboard history is busy, so nothing was deleted. Try again." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Zwischenablageverlauf ist gerade beschäftigt, daher wurde nichts gelöscht. Versuche es erneut."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "El historial del portapapeles está ocupado, así que no se eliminó nada. Inténtalo de nuevo."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "L’historique du presse-papiers est occupé ; rien n’a été supprimé. Réessayez."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "クリップボード履歴が使用中のため、何も削除されませんでした。もう一度お試しください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "클립보드 기록이 사용 중이어서 아무것도 삭제되지 않았습니다. 다시 시도하세요."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O histórico da área de transferência está ocupado, então nada foi apagado. Tente novamente."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "История буфера обмена занята, поэтому ничего не удалено. Попробуйте ещё раз."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "剪贴板历史记录正忙，因此没有删除任何内容。请重试。"
+          }
+        }
+      }
+    },
     "Clipboard history is empty" : {
       "localizations" : {
         "de" : {

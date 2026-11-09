@@ -11,6 +11,7 @@ struct ClipboardTests {
 
     static func main() async throws {
         pinOrder()
+        aBlockedDeleteKeepsTheRow()
         unpinRejoinsAsNewest()
         pasteLeavesPinsAlone()
         try editRewritesInPlace()
@@ -91,6 +92,27 @@ struct ClipboardTests {
         let reopened = ClipboardStore(directory: directory, cipher: .harness)
         reopened.load()
         expect(reopened.items.count == 1, "only the fresh capture is persisted")
+    }
+
+    /// Another writer holding the lock past the timeout fails a delete loudly, never silently.
+    static func aBlockedDeleteKeepsTheRow() {
+        withStore { store, _ in
+            store.addText("kept while busy", sourceBundleID: nil)
+            store.addText("cleared while busy", sourceBundleID: nil)
+            store.togglePinned(item(store, "kept while busy"))
+            var writer: OpaquePointer?
+            sqlite3_open_v2(store.dbURL.path, &writer, SQLITE_OPEN_READWRITE, nil)
+            sqlite3_exec(writer, "BEGIN IMMEDIATE", nil, nil, nil)
+            expect(!store.remove(item(store, "kept while busy")), "a delete the lock blocks reports it")
+            expect(texts(store).contains("kept while busy"), "and the row stays listed")
+            expect(!store.clearAll(), "a blocked clear reports it too")
+            expect(texts(store).contains("cleared while busy"), "and hides nothing")
+            sqlite3_exec(writer, "COMMIT", nil, nil, nil)
+            sqlite3_close_v2(writer)
+            expect(store.remove(item(store, "kept while busy")), "once the lock goes, the delete lands")
+            store.load()
+            expect(!texts(store).contains("kept while busy"), "and stays gone after a reload")
+        }
     }
 
     /// Pins stack in pin order, oldest pin first, regardless of how old the entries are.

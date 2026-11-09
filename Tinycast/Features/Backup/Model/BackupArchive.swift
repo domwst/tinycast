@@ -16,6 +16,10 @@ enum BackupArchive {
     private static let stretchMagic = Array("TCBK".utf8) + [1]
     private static let maximumEntries = 2_000_000
     private static let maximumBytes: Int64 = 64 << 30
+    /// A manifest is a few kilobytes; previewing one never needs more.
+    private static let maximumPreviewBytes: Int64 = 4 << 20
+    /// Blobs a backup never writes, which extraction would restore outside the byte budget.
+    private static let refusedBlobKeys = ["XAT", "ACL"]
 
     enum ArchiveError: LocalizedError, Equatable {
         case cannotWrite
@@ -180,7 +184,8 @@ enum BackupArchive {
         let free =
             (try? directory.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]))?
             .volumeAvailableCapacityForImportantUsage ?? 0
-        let budget = ExtractionBudget(bytes: max(0, min(maximumBytes, free - (1 << 30))))
+        let cap = only == nil ? maximumBytes : maximumPreviewBytes
+        let budget = ExtractionBudget(bytes: max(0, min(cap, free - (1 << 30))))
         do {
             try ArchiveStream.withExtractStream(
                 extractingTo: FilePath(directory.path),
@@ -229,6 +234,12 @@ enum BackupArchive {
                 case .uint(_, let type) = header.field(forKey: ArchiveHeader.FieldKey("TYP")),
                 type == UInt64(ArchiveHeader.EntryType.regularFile.rawValue)
                     || type == UInt64(ArchiveHeader.EntryType.directory.rawValue)
+            else { return .cancel }
+            // A resource fork or ACL rides in its own blob, uncounted, so the entry is refused.
+            guard
+                BackupArchive.refusedBlobKeys.allSatisfy({
+                    header.field(forKey: ArchiveHeader.FieldKey($0)) == nil
+                })
             else { return .cancel }
             if let only, !path.isEmpty, !only.contains(path.string) { return .skip }
             entries += 1

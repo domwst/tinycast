@@ -527,32 +527,42 @@ final class ClipboardStore {
         return edited
     }
 
-    func remove(_ item: ClipboardItem) {
-        deepResult?.removeAll { $0.id == item.id }
+    /// False when the row is still on disk: hiding it now would let the next load revive it.
+    @discardableResult
+    func remove(_ item: ClipboardItem) -> Bool {
         if let stmt = deleteByIDStmt {
             sqlite3_bind_text(stmt, 1, item.id.uuidString, -1, SQLITE_TRANSIENT)
-            sqlite3_step(stmt)
+            let done = sqlite3_step(stmt) == SQLITE_DONE
             sqlite3_reset(stmt)
             sqlite3_clear_bindings(stmt)
+            guard done else { return false }
         }
+        deepResult?.removeAll { $0.id == item.id }
         items.removeAll { $0.id == item.id }
         deleteBlob(item)
+        return true
     }
 
     /// A pin is a deliberate keep, so it outlives the bulk clear; `remove` is the way to drop one.
-    func clearAll() {
+    @discardableResult
+    func clearAll() -> Bool {
         invalidateSearch()
         extractionGeneration = UUID()
         captureGeneration = UUID()
         // RETURNING hands back the deleted blobs in the same pass, so no separate SELECT is needed.
-        if db != nil,
-            let stmt = prepare("DELETE FROM items WHERE pinned_at IS NULL RETURNING id, image_path")
-        {
+        if db != nil {
+            guard
+                let stmt = prepare(
+                    "DELETE FROM items WHERE pinned_at IS NULL RETURNING id, image_path")
+            else { return false }
             var orphaned: [String] = []
-            while sqlite3_step(stmt) == SQLITE_ROW {
+            var status = sqlite3_step(stmt)
+            while status == SQLITE_ROW {
                 if let path = sealedPath(stmt), owns(path) { orphaned.append(path) }
+                status = sqlite3_step(stmt)
             }
             sqlite3_finalize(stmt)
+            guard status == SQLITE_DONE else { return false }
             if !orphaned.isEmpty {
                 Task.detached(priority: .utility) {
                     for path in orphaned { Self.removeBlob(atPath: path) }
@@ -561,6 +571,7 @@ final class ClipboardStore {
         }
         // Every pinned row is resident however old, so the window stays whole without a reload.
         items = items.filter(\.isPinned)
+        return true
     }
 
     @discardableResult
@@ -1345,15 +1356,21 @@ final class ClipboardStore {
         }
         defer { sqlite3_finalize(stmt) }
         var inserted = 0
-        // Committed in chunks, so a delete on the main connection waits briefly, never fails.
-        sqlite3_exec(db, "BEGIN", nil, nil, nil)
-        var pending = 0
-        for staged in items {
-            if pending == Self.importChunk {
-                sqlite3_exec(db, "COMMIT; BEGIN", nil, nil, nil)
-                pending = 0
+        var batch: [ClipboardItem] = []
+        // Decoding and sealing happen outside the lock, so main's deletes wait only on inserts.
+        func flush() {
+            defer { batch.removeAll(keepingCapacity: true) }
+            guard !batch.isEmpty, sqlite3_exec(db, "BEGIN IMMEDIATE", nil, nil, nil) == SQLITE_OK
+            else { return }
+            var written = 0
+            for item in batch where bindAndInsert(stmt, item, cipher) { written += 1 }
+            if sqlite3_exec(db, "COMMIT", nil, nil, nil) == SQLITE_OK {
+                inserted += written
+            } else {
+                sqlite3_exec(db, "ROLLBACK", nil, nil, nil)
             }
-            pending += 1
+        }
+        for staged in items {
             // A file someone sends is held to what a capture would have recorded.
             if staged.kind == .text, (staged.text?.count ?? 0) > maxTextLength { continue }
             let item = adoptionTarget(staged, in: imagesDirectory)
@@ -1363,9 +1380,10 @@ final class ClipboardStore {
             {
                 continue
             }
-            if bindAndInsert(stmt, item, cipher) { inserted += 1 }
+            batch.append(item)
+            if batch.count == Self.importChunk { flush() }
         }
-        sqlite3_exec(db, "COMMIT", nil, nil, nil)
+        flush()
         return inserted
     }
 

@@ -463,6 +463,22 @@ struct ClipboardEncryptionMigrationTest {
         let retried = ClipboardEncryptionMigration.run(
             database: fixture.database, images: fixture.images, cipher: cipher, home: fixture.home)
         check("which the next run does", retried && ClipboardEncryptionMigration.isSealedStore(fixture.database))
+
+        // The swap's copy alone holds the history: one that won't open blocks any re-key.
+        let converting = URL(fileURLWithPath: fixture.database.path + ".converting")
+        try? FileManager.default.moveItem(at: fixture.database, to: converting)
+        chmod(converting.path, 0)
+        check(
+            "an unreadable finished copy beside no original is never resolved",
+            !ClipboardEncryptionMigration.recoverInterruptedSwap(
+                database: fixture.database, images: fixture.images)
+                && FileManager.default.fileExists(atPath: converting.path))
+        chmod(converting.path, 0o600)
+        check(
+            "and once it opens it is swapped in",
+            ClipboardEncryptionMigration.recoverInterruptedSwap(
+                database: fixture.database, images: fixture.images)
+                && ClipboardEncryptionMigration.isSealedStore(fixture.database))
     }
 
     /// A user who never ran the release opens the old file directly: history goes, plaintext too.

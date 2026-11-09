@@ -44,7 +44,8 @@ nonisolated enum ClipboardKeyStore {
 
     /// Blocking: a Keychain read can wait on a system prompt, so this never runs on main.
     static func unlock(database: URL, images: URL) -> Unlock {
-        ClipboardEncryptionMigration.recoverInterruptedSwap(database: database, images: images)
+        guard ClipboardEncryptionMigration.recoverInterruptedSwap(database: database, images: images)
+        else { return .unavailable(.unreadable) }
         let state = ClipboardStore.inspect(database)
         guard state != .unreadable else { return .unavailable(.unreadable) }
         let key: SymmetricKey?

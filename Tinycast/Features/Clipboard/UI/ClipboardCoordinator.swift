@@ -232,9 +232,19 @@ final class ClipboardCoordinator {
     func clearHistory() {
         Task {
             guard await openForWrite() else { return }
-            clipboardStore.clearAll()
+            if !clipboardStore.clearAll() { reportBusy() }
             closeIfDisabled()
         }
+    }
+
+    func removeClip(_ item: ClipboardItem) {
+        if !clipboardStore.remove(item) { reportBusy() }
+    }
+
+    private func reportBusy() {
+        core.showMessage(
+            String(localized: "Clipboard history is busy, so nothing was deleted. Try again."),
+            tone: .danger)
     }
 
     func copyToClipboard(_ item: ClipboardItem) {
