@@ -42,6 +42,7 @@ enum RaycastTests {
         gunzipSlices()
         gunzipCap()
         clipboardMapping()
+        imagePolicy()
         clipboardPinMetadata()
         clipboardRetention()
 
@@ -201,7 +202,44 @@ enum RaycastTests {
         }
         return RaycastClipboardImport.parse(
             decoded, now: { Date(timeIntervalSince1970: 1_700_000_000) },
-            fileExists: { existingImages.contains($0) })
+            acceptsImage: { existingImages.contains($0) })
+    }
+
+    /// A `.rayconfig` may name any path as an image; only Raycast's own real images are read.
+    static func imagePolicy() {
+        let home = FileManager.default.temporaryDirectory
+            .appendingPathComponent("raycast-policy-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let raycast = home.appendingPathComponent("Library/Application Support/com.raycast.macos/clipboard")
+        let ssh = home.appendingPathComponent(".ssh")
+        try? FileManager.default.createDirectory(at: raycast, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: ssh, withIntermediateDirectories: true)
+        // The smallest valid PNG: one transparent pixel.
+        let png = Data(
+            base64Encoded:
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==")!
+        let image = raycast.appendingPathComponent("file-abc.png")
+        try? png.write(to: image)
+        let key = ssh.appendingPathComponent("id_ed25519")
+        try? Data("-----BEGIN OPENSSH PRIVATE KEY-----".utf8).write(to: key)
+        let disguised = raycast.appendingPathComponent("key.png")
+        try? Data("-----BEGIN OPENSSH PRIVATE KEY-----".utf8).write(to: disguised)
+        let link = raycast.appendingPathComponent("link.png")
+        try? FileManager.default.createSymbolicLink(at: link, withDestinationURL: image)
+        let elsewhere = home.appendingPathComponent("Library/Application Support/other/file.png")
+        try? FileManager.default.createDirectory(
+            at: elsewhere.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? png.write(to: elsewhere)
+
+        expect(RaycastImagePolicy.accepts(image.path, home: home), "a real image in Raycast's folder is read")
+        expect(!RaycastImagePolicy.accepts(key.path, home: home), "a key file elsewhere is never read")
+        expect(
+            !RaycastImagePolicy.accepts(raycast.path + "/../../../../.ssh/id_ed25519", home: home),
+            "nor reached through `..` from Raycast's folder")
+        expect(!RaycastImagePolicy.accepts(disguised.path, home: home), "a non-image named .png is refused")
+        expect(!RaycastImagePolicy.accepts(link.path, home: home), "a symlink is refused, even to an image")
+        expect(!RaycastImagePolicy.accepts(elsewhere.path, home: home), "an image in another app's folder is refused")
+        expect(!RaycastImagePolicy.accepts(raycast.path, home: home), "a folder is not an image")
     }
 
     static func clipboardMapping() {
@@ -298,7 +336,7 @@ enum RaycastTests {
         expect(
             clip?.isPinned == true && clip?.pinnedAt == clip?.createdAt,
             "missing createdAt still preserves a pin")
-        let empty = RaycastClipboardImport.parse(nil, now: Date.init, fileExists: { _ in false })
+        let empty = RaycastClipboardImport.parse(nil, now: Date.init, acceptsImage: { _ in false })
         expect(empty.items.isEmpty && empty.missing == 0, "missing clipboard history stays empty")
     }
 

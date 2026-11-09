@@ -999,7 +999,7 @@ Debug answers `tinycast-dev://`; use that scheme for every link below.
   round trip preserve the choice.
 - Every pane renders and the sidebar switches without flicker
 - A feature switch takes effect in the launcher immediately; every setting survives relaunch
-- Export stays disabled until the passphrase has 8+ characters and the confirmation matches; it then
+- Export stays disabled until the passphrase has 10+ characters and the confirmation matches; it then
   produces a `.tinycast` starting `AEA1`, and `strings` on it finds no clip or note text
 - Import asks for the passphrase, reports a wrong one inline under Import, then applies the backup
   and reports a per-category summary. A `.tinycast` exported before encryption opens with no prompt

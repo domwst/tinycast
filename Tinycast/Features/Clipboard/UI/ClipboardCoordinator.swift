@@ -15,7 +15,9 @@ final class ClipboardCoordinator {
     private var textTask: Task<Void, Never>?
     private var pasteSequence: PasteSequence?
     /// One Keychain read at a time; every opener waits on the same answer.
-    private var unlocking: Task<ClipboardCipher?, Never>?
+    private var unlocking: Task<ClipboardKeyStore.Unlock, Never>?
+    /// Why the last unlock left the history shut, for whoever reports it.
+    private(set) var unlockFailure: ClipboardKeyStore.Failure?
 
     init(
         clipboardStore: ClipboardStore,
@@ -79,18 +81,24 @@ final class ClipboardCoordinator {
     /// The store's own key once opened, otherwise one Keychain read (and conversion) off-main.
     func historyCipher() async -> ClipboardCipher? {
         if let cipher = clipboardStore.cipher { return cipher }
-        if let unlocking { return await unlocking.value }
         let database = clipboardStore.dbURL
         let images = clipboardStore.imagesDir
-        let task = Task.detached(priority: .userInitiated) { () -> ClipboardCipher? in
-            guard case .ready(let cipher) = ClipboardKeyStore.unlock(database: database, images: images)
-            else { return nil }
-            return cipher
-        }
+        let task =
+            unlocking
+            ?? Task.detached(priority: .userInitiated) {
+                ClipboardKeyStore.unlock(database: database, images: images)
+            }
         unlocking = task
-        let cipher = await task.value
+        let outcome = await task.value
         unlocking = nil
-        return cipher
+        switch outcome {
+        case .ready(let cipher):
+            unlockFailure = nil
+            return cipher
+        case .unavailable(let failure):
+            unlockFailure = failure
+            return nil
+        }
     }
 
     /// For a one-off write with the feature off, as Clear History and an import make.
@@ -108,7 +116,7 @@ final class ClipboardCoordinator {
     }
 
     private func reportLocked() {
-        core.showMessage(ClipboardKeyStore.Failure.locked.localizedDescription, tone: .danger)
+        core.showMessage((unlockFailure ?? .locked).localizedDescription, tone: .danger)
     }
 
     func followSearchResults(query: String, previous: [ClipboardItem], current: [ClipboardItem]) {

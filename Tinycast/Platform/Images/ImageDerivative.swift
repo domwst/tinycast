@@ -29,6 +29,9 @@ struct ImageDerivative: Sendable {
     static func removeOrphans(in directory: URL) {
         queue.async {
             let folder = directory.appending(path: ".thumbnails", directoryHint: .isDirectory)
+            // `lstat`: a link swapped in for the folder would aim this sweep at someone's files.
+            let type = (try? FileManager.default.attributesOfItem(atPath: folder.path))?[.type]
+            guard type as? FileAttributeType == .typeDirectory else { return }
             for name in (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? [] {
                 guard let edge = name.lastIndex(of: "-") else { continue }
                 let blob = directory.appending(path: String(name[..<edge]))

@@ -230,6 +230,7 @@ final class ClipboardStore {
     /// Longest text history holds; a longer copy is skipped, since truncation would lose the tail.
     nonisolated static let maxTextLength = 32_000
     nonisolated private static let memoryWindow = 1000
+    nonisolated private static let importChunk = 250
     /// The most unpinned rows any one query answers with, exact and loose alike.
     nonisolated private static let searchLimit = 200
     /// Every value sealed, no full-text index; any other `user_version` is discarded on open.
@@ -319,8 +320,10 @@ final class ClipboardStore {
         closeDatabase()
         Self.removeDatabase(at: dbURL)
         // Its blobs belong to rows that are gone, and under another key nothing could open them.
-        for name in (try? FileManager.default.contentsOfDirectory(atPath: imagesDir.path)) ?? [] {
-            try? FileManager.default.removeItem(at: imagesDir.appendingPathComponent(name))
+        if Self.isRealDirectory(imagesDir) {
+            for name in (try? FileManager.default.contentsOfDirectory(atPath: imagesDir.path)) ?? [] {
+                try? FileManager.default.removeItem(at: imagesDir.appendingPathComponent(name))
+            }
         }
         if !openDatabase() { closeDatabase() }
     }
@@ -1026,9 +1029,23 @@ final class ClipboardStore {
         return Self.sealedString(stmt, 1, .imagePath, id, cipher)
     }
 
-    /// Whether a path is inside our images directory; only those are ours to delete.
+    /// Only a blob of ours may ever be deleted, so ownership is never read off an imported path.
     private func owns(_ path: String) -> Bool {
-        path.hasPrefix(imagesDir.path + "/")
+        Self.isOwnedBlob(path, in: imagesDir)
+    }
+
+    /// A direct `.sealed` child of `directory`, standardized first: `images/../x` names `x`.
+    nonisolated static func isOwnedBlob(_ path: String, in directory: URL) -> Bool {
+        guard !path.split(separator: "/").contains("..") else { return false }
+        let url = URL(fileURLWithPath: path).standardizedFileURL
+        return url.pathExtension == SealedFile.fileExtension
+            && url.deletingLastPathComponent().path == directory.standardizedFileURL.path
+    }
+
+    /// `lstat`, not `stat`: a sweep must never follow a link someone swapped in for a folder.
+    nonisolated static func isRealDirectory(_ url: URL) -> Bool {
+        (try? FileManager.default.attributesOfItem(atPath: url.path))?[.type] as? FileAttributeType
+            == .typeDirectory
     }
 
     private func prune() {
@@ -1079,10 +1096,11 @@ final class ClipboardStore {
 
     /// Anything in `images/` or its copies that isn't sealed is plaintext an older build left.
     nonisolated private static func removeUnsealedFiles(in directory: URL) {
+        guard isRealDirectory(directory) else { return }
         let keys: [URLResourceKey] = [.isRegularFileKey, .contentModificationDateKey]
         let stale = Date().addingTimeInterval(-60)
         let thumbnails = directory.appending(path: ".thumbnails", directoryHint: .isDirectory)
-        let entries = [directory, thumbnails].flatMap {
+        let entries = [directory, thumbnails].filter(isRealDirectory).flatMap {
             (try? FileManager.default.contentsOfDirectory(at: $0, includingPropertiesForKeys: keys))
                 ?? []
         }
@@ -1109,6 +1127,8 @@ final class ClipboardStore {
                 == SQLITE_OK,
             Self.prepareSchema(db, cipher: cipher)
         else { return false }
+        // An import holds the write lock a chunk at a time; a delete must wait it out, not drop.
+        sqlite3_busy_timeout(db, 2_000)
         insertStmt = prepare(Self.insertSQL)
         // Two indexed branches, deliberately not one OR. See docs/features/clipboard.md#store.
         loadStmt = prepare(
@@ -1248,9 +1268,15 @@ final class ClipboardStore {
         }
         defer { sqlite3_finalize(stmt) }
         var inserted = 0
-        // One transaction for the batch: ~1 WAL commit rather than one per row.
+        // Committed in chunks, so a delete on the main connection waits briefly, never fails.
         sqlite3_exec(db, "BEGIN", nil, nil, nil)
+        var pending = 0
         for staged in items {
+            if pending == Self.importChunk {
+                sqlite3_exec(db, "COMMIT; BEGIN", nil, nil, nil)
+                pending = 0
+            }
+            pending += 1
             let item = adoptionTarget(staged, in: imagesDirectory)
             guard keys.insert(importKey(item)).inserted else { continue }
             if item.imagePath != staged.imagePath,
@@ -1277,8 +1303,7 @@ final class ClipboardStore {
     nonisolated private static func adoptionTarget(
         _ item: ClipboardItem, in directory: URL
     ) -> ClipboardItem {
-        guard item.kind == .image, let path = item.imagePath,
-            !path.hasPrefix(directory.path + "/")
+        guard item.kind == .image, let path = item.imagePath, !isOwnedBlob(path, in: directory)
         else { return item }
         return ClipboardItem(
             id: item.id, kind: .image, text: nil,
@@ -1295,7 +1320,10 @@ final class ClipboardStore {
     nonisolated static func sealBlob(from source: String?, to destination: String?, key: SymmetricKey)
         -> Bool
     {
+        // A regular file only, by `lstat`: a link or a device must not be read into history.
         guard let source, let destination,
+            (try? FileManager.default.attributesOfItem(atPath: source))?[.type] as? FileAttributeType
+                == .typeRegular,
             let data = try? Data(contentsOf: URL(fileURLWithPath: source), options: .mappedIfSafe)
         else { return false }
         return (try? SealedFile.write(data, to: URL(fileURLWithPath: destination), key: key)) != nil

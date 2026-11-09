@@ -22,7 +22,7 @@ every backup needs a passphrase.
 
 ## Every backup is encrypted
 
-When you export, you choose a passphrase of at least 8 characters and type it twice. The file is
+When you export, you choose a passphrase of at least 10 characters and type it twice. The file is
 encrypted with it, so clipboard history, notes and snippets in a backup can't be read without it.
 Importing asks for the passphrase before it shows what the file contains.
 

@@ -16,7 +16,8 @@ struct BackupBundle: Sendable {
 
     // MARK: - Layout
 
-    var manifestURL: URL { root.appendingPathComponent("manifest.json") }
+    static let manifestName = "manifest.json"
+    var manifestURL: URL { root.appendingPathComponent(Self.manifestName) }
     var settingsURL: URL { root.appendingPathComponent("settings.json") }
 
     private func directory(for category: BackupCategory) -> URL {

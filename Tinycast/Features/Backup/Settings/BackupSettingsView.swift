@@ -25,8 +25,8 @@ struct BackupSettingsView: View {
     /// Cleared by leaving the pane or choosing again, so a late decrypt discards its own tree.
     @State private var openRequest: UUID?
     @State private var openedManifest: BackupManifest?
-    /// Held between opening the file and applying it, so the extracted tree survives the picker.
-    @State private var openedStaging: BackupStaging?
+    /// Kept for Import, which unpacks the file again: the preview extracts only its manifest.
+    @State private var openedPassphrase: String?
 
     private enum Status {
         case success(String)
@@ -304,10 +304,9 @@ struct BackupSettingsView: View {
         Task {
             defer { if openRequest == request { openingBackup = false } }
             do {
-                let (staging, manifest) = try await BackupActions.openBackup(
-                    at: url, passphrase: passphrase)
-                guard openRequest == request else { return staging.discard() }
-                openedStaging = staging
+                let manifest = try await BackupActions.openBackup(at: url, passphrase: passphrase)
+                guard openRequest == request else { return }
+                openedPassphrase = passphrase
                 openedManifest = manifest
                 importSelection = manifest.categories
                 backupPassphrase = ""
@@ -318,29 +317,31 @@ struct BackupSettingsView: View {
     }
 
     private func runBackupImport() {
-        guard let staging = openedStaging, !importingBackup, !importSelection.isEmpty else {
-            return
-        }
+        guard let file = backupFile, openedManifest != nil, !importingBackup, !importSelection.isEmpty
+        else { return }
         importingBackup = true
         let categories = importSelection
+        let passphrase = openedPassphrase
         Task {
             defer { importingBackup = false }
-            let summary = await BackupActions.applyBackup(
-                categories, from: staging, to: core)
-            // Staged files are adopted by the stores during apply, so the tree goes either way.
-            discardStagedBackup()
-            backupFile = nil
-            backupIsEncrypted = false
-            if let summary { importStatus = .success(BackupActions.summaryText(summary)) }
+            do {
+                let summary = try await BackupActions.applyBackup(
+                    categories, file: file, passphrase: passphrase, to: core)
+                discardStagedBackup()
+                backupFile = nil
+                backupIsEncrypted = false
+                if let summary { importStatus = .success(BackupActions.summaryText(summary)) }
+            } catch {
+                importStatus = .failure(error.localizedDescription)
+            }
         }
     }
 
-    /// The extracted tree can run to gigabytes, so leaving the pane must not strand it.
+    /// Leaving the pane forgets the opened file and its passphrase; nothing of it is on disk.
     private func discardStagedBackup() {
         openRequest = nil
         openingBackup = false
-        openedStaging?.discard()
-        openedStaging = nil
+        openedPassphrase = nil
         openedManifest = nil
     }
 

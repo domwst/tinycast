@@ -62,7 +62,9 @@ enum BackupActions {
         var cipher: ClipboardCipher?
         if categories.contains(.clipboard) {
             cipher = await core.clipboardCoordinator.historyCipher()
-            guard cipher != nil else { throw ClipboardKeyStore.Failure.locked }
+            guard cipher != nil else {
+                throw core.clipboardCoordinator.unlockFailure ?? ClipboardKeyStore.Failure.locked
+            }
         }
         guard let destination = chooseSaveLocation(named: "Tinycast", type: .tinycastBackup) else {
             throw CancellationError()
@@ -82,24 +84,33 @@ enum BackupActions {
     }
 
     /// Opens the archive and reads its manifest, leaving staging for the caller to apply and discard.
-    static func openBackup(
-        at file: URL, passphrase: String?
-    ) async throws -> (BackupStaging, BackupManifest) {
+    /// Only the manifest is unpacked to preview a file, so the history stays sealed until Import.
+    static func openBackup(at file: URL, passphrase: String?) async throws -> BackupManifest {
         try await Task.detached(priority: .userInitiated) {
+            let staging = try BackupStaging()
+            defer { staging.discard() }
+            try BackupArchive.open(
+                file: file, into: staging.root, passphrase: passphrase,
+                only: [BackupBundle.manifestName])
+            return try staging.bundle.readManifest()
+        }.value
+    }
+
+    /// Unpacked whole only now, applied, and gone again before this returns.
+    static func applyBackup(
+        _ categories: Set<BackupCategory>, file: URL, passphrase: String?, to core: AppCore
+    ) async throws -> BackupApplier.Summary? {
+        let staging = try await Task.detached(priority: .userInitiated) {
             let staging = try BackupStaging()
             do {
                 try BackupArchive.open(file: file, into: staging.root, passphrase: passphrase)
-                return (staging, try staging.bundle.readManifest())
+                return staging
             } catch {
                 staging.discard()
                 throw error
             }
         }.value
-    }
-
-    static func applyBackup(
-        _ categories: Set<BackupCategory>, from staging: BackupStaging, to core: AppCore
-    ) async -> BackupApplier.Summary? {
+        defer { staging.discard() }
         let bundle = staging.bundle
         if categories.contains(.configuration),
             let data = try? Data(contentsOf: bundle.settingsURL),
@@ -168,10 +179,9 @@ enum BackupActions {
             missingImages: result.missingImages)
     }
 
-    /// Every Raycast channel (stable, beta, alpha, internal) shares this bundle-id prefix.
-    static let raycastBundleIDPrefix = "com.raycast"
-
-    static func isRaycastBundleID(_ id: String) -> Bool { id.hasPrefix(raycastBundleIDPrefix) }
+    static func isRaycastBundleID(_ id: String) -> Bool {
+        id.hasPrefix(RaycastImagePolicy.bundleIDPrefix)
+    }
 
     /// Quit any running Raycast so its hotkeys stop clashing; background helpers stay.
     static func quitRaycast() {

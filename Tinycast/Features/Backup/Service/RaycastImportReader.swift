@@ -16,8 +16,7 @@ enum RaycastImportReader {
         backup.favoriteApps = mapFavorites(json)
         backup.launcherAliases = mapAliases(json)
         let (clipboard, missing) = RaycastClipboardImport.parse(
-            json["clipboardHistory"], now: Date.init,
-            fileExists: { FileManager.default.fileExists(atPath: $0) })
+            json["clipboardHistory"], now: Date.init, acceptsImage: { RaycastImagePolicy.accepts($0) })
         let snippets = RaycastSnippetImport.parse(
             (json["snippets"] as? [String: Any])?["snippets"])
         let quicklinks = RaycastQuicklinkImport.parse(json["quicklinks"])

@@ -37,6 +37,7 @@ struct BackupArchiveTest {
         rejectsGarbage(in: root)
         refusesTraversal(in: root)
         refusesSymbolicLinks(in: root)
+        refusesSpecialFiles(in: root)
         categoriesAreComplete()
         staging()
         launchSweep()
@@ -161,8 +162,38 @@ struct BackupArchiveTest {
                 "a short passphrase is refused",
                 error as? BackupArchive.ArchiveError == .passphraseTooShort)
         }
-        let derived = BackupArchive.archivePassword(for: "x")
+        let derived = BackupArchive.archivePassword(
+            for: "x", salt: [UInt8](repeating: 0, count: 16), rounds: 100_000)
         check("the derived password fits AEA's bounds", (20...256).contains(derived.utf8.count))
+        check(
+            "a different salt derives a different password",
+            derived
+                != BackupArchive.archivePassword(
+                    for: "x", salt: [UInt8](repeating: 1, count: 16), rounds: 100_000))
+        do {
+            try BackupArchive.seal(
+                directory: source, into: root.appendingPathComponent("nine.tinycast"),
+                passphrase: "ninechars")
+            check("nine characters is still too short", false)
+        } catch {
+            check("nine characters is still too short", error as? BackupArchive.ArchiveError == .passphraseTooShort)
+        }
+
+        let previewed = root.appendingPathComponent("preview")
+        try? BackupArchive.open(
+            file: archive, into: previewed, passphrase: passphrase, only: [BackupBundle.manifestName])
+        let previewNames = (try? FileManager.default.subpathsOfDirectory(atPath: previewed.path)) ?? []
+        check("a preview unpacks the manifest and nothing else", previewNames == [BackupBundle.manifestName])
+
+        // A file whose header claims a single round must not get a near-free derivation.
+        let weak = root.appendingPathComponent("weak.tinycast")
+        let weakBuilt = writeFixture(weak, encrypted: true, rounds: 1) { encoder in
+            try encoder.writeDirectoryContents(
+                archiveFrom: FilePath(source.path),
+                keySet: ArchiveHeader.FieldKeySet("TYP,PAT,DAT,MOD,MTM")!)
+        }
+        check("the weak fixture can be built", weakBuilt)
+        check("rounds outside the accepted range are refused", openError(weak, passphrase: passphrase, in: root) == .cannotRead)
 
         // Written before encryption existed: plain LZFSE, which must keep importing.
         let legacy = root.appendingPathComponent("legacy.tinycast")
@@ -198,7 +229,7 @@ struct BackupArchiveTest {
 
     /// Hand-built archives, so each guard runs behind both the encrypted and the legacy reader.
     static func writeFixture(
-        _ archive: URL, encrypted: Bool, _ body: (ArchiveStream) throws -> Void
+        _ archive: URL, encrypted: Bool, rounds: UInt32 = 100_000, _ body: (ArchiveStream) throws -> Void
     ) -> Bool {
         guard
             let destination = ArchiveByteStream.fileStream(
@@ -207,9 +238,9 @@ struct BackupArchiveTest {
         else { return false }
         let stream: ArchiveByteStream?
         if encrypted {
-            let context = ArchiveEncryptionContext(
-                profile: .hkdf_sha256_aesctr_hmac__scrypt__none, compressionAlgorithm: .lzfse)
-            guard (try? context.setPassword(BackupArchive.archivePassword(for: passphrase))) != nil
+            guard
+                let context = try? BackupArchive.encryptionContext(
+                    passphrase: passphrase, rounds: rounds)
             else { return false }
             stream = ArchiveByteStream.encryptionStream(
                 writingTo: destination, encryptionContext: context)
@@ -347,6 +378,27 @@ struct BackupArchiveTest {
             check(
                 "\(label): an entry naming `..` never lands outside the destination",
                 !FileManager.default.fileExists(atPath: escaped.path))
+        }
+    }
+
+    /// A FIFO named like the manifest would block extraction forever; only files and folders pass.
+    static func refusesSpecialFiles(in root: URL) {
+        for encrypted in [true, false] {
+            let label = encrypted ? "encrypted" : "legacy"
+            let archive = root.appendingPathComponent("fifo-\(label).tinycast")
+            let built = writeFixture(archive, encrypted: encrypted) { encoder in
+                let header = ArchiveHeader()
+                // 80 is `P`, a named pipe; the Swift overlay names no FIFO case to spell it with.
+                header.append(.uint(key: ArchiveHeader.FieldKey("TYP"), value: 80))
+                header.append(.string(key: ArchiveHeader.FieldKey("PAT"), value: "manifest.json"))
+                header.append(.uint(key: ArchiveHeader.FieldKey("MOD"), value: 0o644))
+                try encoder.writeHeader(header)
+            }
+            check("the \(label) FIFO fixture can be built", built)
+            let started = Date()
+            let error = openError(archive, passphrase: passphrase, in: root)
+            check("\(label): an archive carrying a FIFO is refused", error == .cannotRead)
+            check("\(label): and refused at once, not after a hang", Date().timeIntervalSince(started) < 5)
         }
     }
 

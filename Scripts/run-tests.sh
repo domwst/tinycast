@@ -683,6 +683,7 @@ run -O index notes-editor-performance \
                            Tinycast/Features/Notes/UI/NoteTextView.swift \
                            Tinycast/Features/Notes/UI/NoteEditorView.swift
 run slow -O raycast-test   Tinycast/Features/Backup/Model/RaycastImportError.swift \
+                           Tinycast/Features/Backup/Service/RaycastImagePolicy.swift \
                            Tinycast/Features/Backup/Service/RaycastDecoder.swift \
                            Tinycast/Features/Backup/Service/Scrypt.swift \
                            Tinycast/Platform/Compression/Zlib.swift \

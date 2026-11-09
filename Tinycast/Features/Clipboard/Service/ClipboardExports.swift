@@ -18,6 +18,12 @@ nonisolated enum ClipboardExports {
     static func write(_ data: Data, named name: String = imageName, in root: URL = directory) throws
         -> URL
     {
+        // A link planted in place of the root would carry the plaintext to wherever it points.
+        if (try? FileManager.default.attributesOfItem(atPath: root.path))?[.type] as? FileAttributeType
+            == .typeSymbolicLink
+        {
+            try FileManager.default.removeItem(at: root)
+        }
         let folder = root.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(
             at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])

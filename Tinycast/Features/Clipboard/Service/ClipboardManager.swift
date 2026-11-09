@@ -159,12 +159,16 @@ final class ClipboardManager {
         if let types = pb.types, !Set(types).isDisjoint(with: Self.sensitiveTypes) { return }
 
         // A menu-bar helper writes while another app is frontmost, so every witness can block.
-        let source = source(writer: writer?.pid)
+        let source = source(writer: writer)
         if source.isBlocked(byDisabled: settings.clipboardDisabledApps) { return }
         let sourceBundleID = source.recordedBundleID
 
+        // Reading a promised type runs its writer's code, which can swap the board for a secret.
+        let unchanged = { pb.changeCount == generation }
+
         // Ahead of the text branch: Finder puts the file's *name* on `.string` beside its URL.
         if let paths = Self.fileURLs(on: pb) {
+            guard unchanged() else { return }
             store.addFiles(paths, sourceBundleID: sourceBundleID)
             return
         }
@@ -172,12 +176,13 @@ final class ClipboardManager {
         if let text = pb.string(forType: .string),
             !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         {
-            guard text.count <= ClipboardStore.maxTextLength else { return }
+            guard unchanged(), text.count <= ClipboardStore.maxTextLength else { return }
             store.addText(text, sourceBundleID: sourceBundleID)
             return
         }
 
         if let type = pb.availableType(from: [.png, .tiff]), let data = pb.data(forType: type) {
+            guard unchanged() else { return }
             let isPNG = type == .png
             let store = store
             let capture = store.captureGeneration
@@ -195,22 +200,22 @@ final class ClipboardManager {
 
         guard let text = Self.plainText(fromRichTextOn: pb),
             !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-            text.count <= ClipboardStore.maxTextLength
+            text.count <= ClipboardStore.maxTextLength, unchanged()
         else { return }
         store.addText(text, sourceBundleID: sourceBundleID)
     }
 
-    private func source(writer: pid_t?) -> ClipboardSource {
+    private func source(writer: PasteboardOwnerMonitor.Owner?) -> ClipboardSource {
         ClipboardSource(
-            writer: writer.map(Self.appChain) ?? [],
-            typingFocus: TypingFocus.pid().map(Self.appChain) ?? [],
+            writer: writer.map { Self.appChain($0.executable ?? ProcessExecutable.path(of: $0.pid)) } ?? [],
+            typingFocus: TypingFocus.pid().map { Self.appChain(ProcessExecutable.path(of: $0)) } ?? [],
             frontmost: NSWorkspace.shared.frontmostApplication?.bundleIdentifier)
     }
 
-    /// Bundle IDs of a process's app and every app around it; empty for a bare tool or service.
-    private static func appChain(of pid: pid_t) -> [String] {
-        guard let path = ProcessExecutable.path(of: pid) else { return [] }
-        return ClipboardSource.enclosingAppBundles(ofExecutable: path)
+    /// Bundle IDs of an executable's app and every app around it; empty for a bare tool or service.
+    private static func appChain(_ executable: String?) -> [String] {
+        guard let executable else { return [] }
+        return ClipboardSource.enclosingAppBundles(ofExecutable: executable)
             .compactMap { Bundle(path: $0)?.bundleIdentifier }
     }
 

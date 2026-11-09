@@ -35870,6 +35870,58 @@
         }
       }
     },
+    "Clipboard history couldn't be encrypted, so it stays closed for now." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Zwischenablageverlauf konnte nicht verschlüsselt werden und bleibt vorerst geschlossen."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No se pudo cifrar el historial del portapapeles, así que permanece cerrado por ahora."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "L’historique du presse-papiers n’a pas pu être chiffré ; il reste fermé pour le moment."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "クリップボード履歴を暗号化できなかったため、今は閉じたままです。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "클립보드 기록을 암호화할 수 없어 당분간 닫힌 상태로 유지됩니다."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Não foi possível criptografar o histórico da área de transferência, então ele fica fechado por enquanto."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Не удалось зашифровать историю буфера обмена, поэтому пока она остаётся закрытой."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法加密剪贴板历史记录，因此暂时保持关闭。"
+          }
+        }
+      }
+    },
     "Clipboard history is empty" : {
       "localizations" : {
         "de" : {

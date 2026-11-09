@@ -29,7 +29,8 @@ enum BackupApplier {
                 if summary.clipboard > 0, core.settings.clipboardEnabled { core.clipboardStore.load() }
                 core.clipboardCoordinator.closeIfDisabled()
             } else {
-                summary.problems.append(ClipboardKeyStore.Failure.locked.localizedDescription)
+                summary.problems.append(
+                    (core.clipboardCoordinator.unlockFailure ?? .locked).localizedDescription)
             }
         }
         if categories.contains(.snippets) {

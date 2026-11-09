@@ -127,13 +127,19 @@ copies while Finder or anything else stays frontmost and marks nothing concealed
    filtered to `pboard`'s own `Apple CFPasteboard general has new generation N … - pid: P` line. `N`
    is `NSPasteboard.general.changeCount`, so the writer is matched by generation rather than by time,
    and the last 64 are kept. The line arrives within a millisecond, so a poll that races it holds the
-   generation for one tick; a drain before Tinycast writes never waits.
+   generation for one tick; a drain before Tinycast writes never waits. Only lines whose
+   `processImagePath` is `/usr/libexec/pboard` count, each marker must appear exactly once (a
+   pasteboard or process named to look like a second record makes the line ambiguous and dropped),
+   two owners claimed for one generation leave it unknown, and the writer's executable is resolved as
+   its line arrives, before a short-lived helper can exit.
 2. **The keyboard-focus owner**, from SkyLight's `SLPSGetTypingFocusProcess` through `dlsym`
    (`Platform/TypingFocus.swift`). It is a process other than the frontmost only when a panel took the
    keyboard without activating its app, which is exactly the menu-bar case.
 3. **The frontmost app**, which was the only witness before and still blocks on its own.
 
-History records the writer's outermost app, so an Xcode helper reads as Xcode; a writer in no app
+Reading a promised type runs the writer's code, which could replace the board with a concealed
+copy mid-read, so the generation is checked again after the content is read and before it is
+recorded. History records the writer's outermost app, so an Xcode helper reads as Xcode; a writer in no app
 bundle, such as `pbcopy`, records the frontmost app as before. Every witness fails safe: a macOS
 without the SkyLight symbols, a user `log stream` refuses (it gives up after three quick exits) or a
 changed log line leaves the frontmost app as the only vote. The message text is `pboard`'s debug
@@ -223,6 +229,11 @@ Keychain read can wait on that prompt, and decides:
 - **Any other error:** the store stays shut for the session and the coordinator shows
   "Clipboard history is locked"; nothing is deleted and nothing new is recorded.
 
+A new key always goes into a freshly created item: the old one is deleted first, because updating an
+item another process planted would keep the access list it chose. A conversion that fails without a
+crash also keeps the store shut, with its own message, since opening would discard the plaintext
+file it still has to seal; the next launch tries again.
+
 `ClipboardCipher` derives two keys from the root key with HKDF-SHA256: one for column values and one
 for blobs. A column value is AES-GCM with a random nonce and the field name plus row id as associated
 data, so a sealed `text` can't be moved into another row or into `source_app`. `image_path` is sealed
@@ -252,11 +263,23 @@ leftover plaintext images keep it pending until a run removes them, capture on o
 skips the release that carries it loses that history instead: the store refuses the old
 `user_version` and `load` deletes the unsealed files, so skipping it never leaves plaintext behind.
 
+**Nothing a file names is trusted.** `isOwnedBlob` is the only test of ownership, and it wants a
+direct `.sealed` child of `imagesDir` on the standardized path, so a row naming `images/../x` is
+never pruned, deleted or cleared — every other image path an import hands over is sealed into a
+copy. `sealBlob` reads only a regular file by `lstat`, and a Raycast import only accepts what
+`RaycastImagePolicy` does: a decodable image inside a `com.raycast*` Application Support folder,
+with no `..` and no symlink, so a `.rayconfig` can't put `~/.ssh` into history. Every destructive
+sweep — `open()`'s discard, `removeUnsealedFiles`, the thumbnail orphans, exports and backup
+staging — checks with `lstat` that its folder is a real directory and never follows a link.
+
 **What this does not cover, and says so.** Copies of the old plaintext in Time Machine backups and
 APFS snapshots made before the conversion age out on their own schedule; FileVault is what protects
 the disk. The live pasteboard is plaintext to every app, as it is for every clipboard manager. A
-sealed value's length tells roughly how long a clip is. Anything able to approve a Keychain prompt as
-the user can read the key, and a process already on the account before the store first exists could
+sealed value's length tells roughly how long a clip is. The key is in the legacy login keychain,
+whose file is encrypted by the login password alone, so a copy of the disk or an unencrypted backup
+is as safe as that password; the data-protection keychain would tie it to the Mac, but needs a
+signing setup this app doesn't have. Anything able to approve a Keychain prompt as the user, or to
+change the default keychain, can read or redirect the key, and a process already on the account before the store first exists could
 plant both a key and a store it opens; app-level encryption can't outlast an attacker who stays. A
 Keychain item another process created with an access list that refuses Tinycast can't be replaced,
 so it locks the history (a denial, never a disclosure). A backup's staging tree in `Caches` holds plaintext while an export or

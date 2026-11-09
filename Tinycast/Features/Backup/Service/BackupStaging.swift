@@ -6,6 +6,12 @@ struct BackupStaging: Sendable {
 
     init(base: URL = AppPaths.caches()) throws {
         let container = Self.container(in: base)
+        // A link planted in place of the folder would put plaintext, and sweeps, wherever it points.
+        if (try? FileManager.default.attributesOfItem(atPath: container.path))?[.type]
+            as? FileAttributeType == .typeSymbolicLink
+        {
+            try FileManager.default.removeItem(at: container)
+        }
         Self.sweep(container, before: Date().addingTimeInterval(-86_400))
         root = container.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -22,6 +28,9 @@ struct BackupStaging: Sendable {
 
     /// A run killed mid-flight leaves its tree behind, and nothing else ever reclaims it.
     private static func sweep(_ container: URL, before cutoff: Date) {
+        guard (try? FileManager.default.attributesOfItem(atPath: container.path))?[.type]
+            as? FileAttributeType == .typeDirectory
+        else { return }
         let keys: Set<URLResourceKey> = [.contentModificationDateKey]
         let orphans =
             (try? FileManager.default.contentsOfDirectory(

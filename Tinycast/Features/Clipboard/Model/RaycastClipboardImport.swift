@@ -1,8 +1,9 @@
 import Foundation
 
 enum RaycastClipboardImport {
+    /// `acceptsImage` vets each image path the file names, which an attacker may have written.
     static func parse(
-        _ value: Any?, now: () -> Date, fileExists: (String) -> Bool
+        _ value: Any?, now: () -> Date, acceptsImage: (String) -> Bool
     ) -> (items: [ClipboardItem], missing: Int) {
         guard let entries = (value as? [String: Any])?["clipboardEntries"] as? [[String: Any]]
         else { return ([], 0) }
@@ -32,7 +33,7 @@ enum RaycastClipboardImport {
                 ($0["mimeType"] as? String)?.hasPrefix("image/") == true
                     && ($0["contentType"] as? String) == "url"
             })?["content"] as? String {
-                guard fileExists(path) else {
+                guard acceptsImage(path) else {
                     missing += 1
                     continue
                 }

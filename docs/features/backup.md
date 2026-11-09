@@ -31,8 +31,11 @@ A backup carries five independently selectable categories, ticked on export and 
   statement. Writing it any other way is the first line of a backup-format migration, and there is none.
 - **Every export is encrypted, and the passphrase never touches disk.** A `.tinycast` holds clipboard
   history and notes and gets sent around, so `BackupArchive.seal` takes a passphrase of at least
-  `minimumPassphraseLength` characters and has no unencrypted path. Only `open` still reads a plain
-  LZFSE archive, so a backup written before encryption keeps importing.
+  `minimumPassphraseLength` (10) characters and has no unencrypted path. Only `open` still reads a
+  plain LZFSE archive, so a backup written before encryption keeps importing.
+- **Extraction admits only regular files and directories, within a budget.** A FIFO would block it
+  forever and a tiny file can expand to fill the disk, so `ExtractionBudget` cancels on any other
+  entry type, past two million entries, or past the space the volume can spare (64 GB at most).
 - **Extensions, AI chat history, Keychain material and anything in `Caches` never travel.** An
   extension is third-party code and third-party data; chat history and API keys stay on the Mac that
   had them; a cache regenerates on its own.
@@ -89,11 +92,13 @@ because a newline inside a clip is escaped as `\n` by the encoder and can never 
 stretches the passphrase, then AES-CTR with an HMAC over every segment, with LZFSE applied inside the
 encryption. The file starts `AEA1`, which is how `isEncrypted` labels a chosen file before a passphrase
 is typed; a wrong passphrase makes `decryptionStream` refuse the header, reported as
-`incorrectPassphrase`. AEA only accepts a password of 20 to 256 bytes, so `archivePassword(for:)` hands
-it the hex SHA-256 of a fixed `tinycast-backup-passphrase-v1:` prefix plus the NFC-normalised
-passphrase: any typed length fits, the same words typed composed or decomposed open the same file, and
-scrypt still sets the cost of every guess. The prefix is part of the format; changing it orphans every
-existing backup.
+`incorrectPassphrase`. AEA's scrypt costs a guess about 35 ms, so the passphrase is stretched first:
+600,000 rounds of PBKDF2-HMAC-SHA256 over the NFC-normalised passphrase, salted with a fixed
+`tinycast-backup-passphrase-v1:` prefix and 16 random bytes, and the hex result is AEA's password —
+which also fits its 20–256-byte limit whatever was typed. The salt and round count ride in AEA's
+authenticated `authData` (`TCBK`, a version byte, rounds, salt), readable before the passphrase is;
+a file claiming fewer than 100,000 or more than ten million rounds is refused, so a hostile one can
+neither weaken nor stall the derivation. The prefix and layout are part of the format.
 
 **AppleArchive, LZFSE, and a deliberately narrow keyset.** `"TYP,PAT,DAT,MOD,MTM"` rather than
 `.defaultForArchive`: no `UID`/`GID`, which would restore another Mac's numeric owner, and no `IDX`,
@@ -110,7 +115,9 @@ and asserts nothing escapes.
 
 **Staging lives in `Caches`, not `temporaryDirectory`.** Export unseals each clipboard image into
 it as a PNG and writes the clips' text as JSONL, so for the length of a run the staging tree is
-plaintext; it is the archive that leaves the Mac encrypted.
+plaintext; it is the archive that leaves the Mac encrypted. Opening a file to import extracts only
+its manifest (`open(…, only:)`), so the pane shows categories and counts without unpacking a
+history; Import unpacks the whole file again, applies it and discards the tree before returning.
 Leaving the Settings pane discards a tree the user opened but never imported; `BackupStaging` sweeps
 anything a day old on the next run, and `AppCore.start` sweeps every tree older than the launch, since a
 run killed mid-flight leaves its plaintext behind.

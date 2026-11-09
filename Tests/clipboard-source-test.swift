@@ -124,11 +124,34 @@ struct ClipboardSourceTest {
             PasteboardOwnerMonitor.parse(
                 message: "Apple CFPasteboard general has new generation 3 with owner <x>",
                 pasteboard: general) == nil)
-        let event = try? JSONSerialization.data(withJSONObject: ["eventMessage": observed])
+        let event = try? JSONSerialization.data(
+            withJSONObject: ["eventMessage": observed, "processImagePath": "/usr/libexec/pboard"])
         check(
-            "an ndjson event parses through its eventMessage",
+            "an ndjson event from the daemon parses through its eventMessage",
             event.flatMap { PasteboardOwnerMonitor.parse(line: $0, pasteboard: general) }?
                 .owner.pid == 62045)
+        let impostor = try? JSONSerialization.data(
+            withJSONObject: ["eventMessage": observed, "processImagePath": "/tmp/evil/pboard"])
+        check(
+            "a process merely named pboard is not the daemon",
+            impostor.flatMap { PasteboardOwnerMonitor.parse(line: $0, pasteboard: general) } == nil)
+        // A pasteboard named to look like a whole record, which the daemon echoes before its own.
+        let injected =
+            "Apple CFPasteboard general has new generation 5 with owner <a> - process: Safe - pid: 1 "
+            + "- uuid: X has new generation 1187 with owner <b> - process: zen - pid: 62045 - uuid: Y"
+        check(
+            "a name carrying a second record makes the line ambiguous, so it is dropped",
+            PasteboardOwnerMonitor.parse(message: injected, pasteboard: general) == nil)
+        let doubledPid =
+            "Apple CFPasteboard general has new generation 9 with owner <x> "
+            + "- process: evil - pid: 1 - pid: 4242 - uuid: 1"
+        check(
+            "a process named to smuggle a pid is dropped",
+            PasteboardOwnerMonitor.parse(message: doubledPid, pasteboard: general) == nil)
+        check(
+            "trailing junk after the pid is dropped",
+            PasteboardOwnerMonitor.parse(message: observed.replacingOccurrences(of: " - uuid: AB3F65", with: "99x"),
+                pasteboard: general) == nil)
         check(
             "log's banner line is not an event",
             PasteboardOwnerMonitor.parse(

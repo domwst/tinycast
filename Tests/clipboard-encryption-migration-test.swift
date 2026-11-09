@@ -37,6 +37,7 @@ struct ClipboardEncryptionMigrationTest {
         cleanupResumesAfterTheSwap()
         onlyTheRightKeyOpensTheStore()
         imagesStayBoundToTheirRows()
+        importedPathsAreNeverOwned()
 
         print(failures == 0 ? "\nALL PASSED" : "\n\(failures) FAILED")
         exit(failures == 0 ? 0 : 1)
@@ -346,6 +347,32 @@ struct ClipboardEncryptionMigrationTest {
         check(
             "a row pointed at another row's image no longer opens",
             store.items.filter { $0.kind == .image }.count == 2)
+    }
+
+    /// `images/../victim` is not ours: an import copies it and no prune or delete ever touches it.
+    static func importedPathsAreNeverOwned() {
+        let root = scratch()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = ClipboardStore(directory: root, cipher: cipher)
+        let victim = root.appendingPathComponent("victim")
+        try? FileManager.default.createDirectory(at: victim, withIntermediateDirectories: true)
+        try? Data("keep".utf8).write(to: victim.appendingPathComponent("precious.txt"))
+        let crafted = store.imagesDir.path + "/../victim"
+        check("a traversal path is not an owned blob", !ClipboardStore.isOwnedBlob(crafted, in: store.imagesDir))
+        let old = Date().addingTimeInterval(-400 * 86_400)
+        store.importEntries([
+            ClipboardItem(imagePath: crafted, createdAt: old, sourceBundleID: nil),
+            ClipboardItem(
+                imagePath: store.imagesDir.path + "/../victim/precious.txt", createdAt: old,
+                sourceBundleID: nil)
+        ])
+        store.maxAge = 86_400
+        store.enforceLimits()
+        for item in store.items { store.remove(item) }
+        store.clearAll()
+        check(
+            "an imported path outside the store survives import, prune, delete and clear",
+            FileManager.default.fileExists(atPath: victim.appendingPathComponent("precious.txt").path))
     }
 
     /// A user who never ran the release opens the old file directly: history goes, plaintext too.

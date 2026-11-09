@@ -1,4 +1,5 @@
 import AppleArchive
+import CommonCrypto
 import CryptoKit
 import Foundation
 import System
@@ -7,7 +8,14 @@ enum BackupArchive {
     static let fileExtension = "tinycast"
 
     /// Typed by a person and guessable offline, so anything shorter is refused before sealing.
-    static let minimumPassphraseLength = 8
+    static let minimumPassphraseLength = 10
+    /// PBKDF2 rounds ahead of AEA's own scrypt, which on its own costs a guess about 35 ms.
+    static let stretchRounds: UInt32 = 600_000
+    /// A file's own claim, bounded, so a hostile one can neither weaken nor stall the derivation.
+    private static let acceptedRounds: ClosedRange<UInt32> = 100_000...10_000_000
+    private static let stretchMagic = Array("TCBK".utf8) + [1]
+    private static let maximumEntries = 2_000_000
+    private static let maximumBytes: Int64 = 64 << 30
 
     enum ArchiveError: LocalizedError, Equatable {
         case cannotWrite
@@ -39,7 +47,7 @@ enum BackupArchive {
 
     /// Apple Encrypted Archive: scrypt-derived key, AES-CTR + HMAC, LZFSE inside the encryption.
     static func seal(directory: URL, into file: URL, passphrase: String) throws {
-        let context = try encryptionContext(passphrase: passphrase)
+        let context = try encryptionContext(passphrase: passphrase, rounds: stretchRounds)
         guard let keySet,
             let destination = ArchiveByteStream.fileStream(
                 path: FilePath(file.path), mode: .writeOnly, options: [.create, .truncate],
@@ -75,19 +83,26 @@ enum BackupArchive {
     }
 
     /// An encrypted file needs `passphrase`; one written before encryption opens without it.
-    static func open(file: URL, into directory: URL, passphrase: String?) throws {
+    /// `only` names the entries to extract, so a preview never unpacks the history it describes.
+    static func open(
+        file: URL, into directory: URL, passphrase: String?, only: Set<String>? = nil
+    ) throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         guard let source = fileStream(file) else { throw ArchiveError.cannotRead }
         defer { try? source.close() }
         if let context = ArchiveEncryptionContext(from: source) {
             guard let passphrase, !passphrase.isEmpty else { throw ArchiveError.passphraseRequired }
-            try context.setPassword(archivePassword(for: passphrase))
+            guard let stretch = context.authData.flatMap(parseStretch) else {
+                throw ArchiveError.cannotRead
+            }
+            try context.setPassword(
+                archivePassword(for: passphrase, salt: stretch.salt, rounds: stretch.rounds))
             guard
                 let decryptor = ArchiveByteStream.decryptionStream(
                     readingFrom: source, encryptionContext: context)
             else { throw ArchiveError.incorrectPassphrase }
             defer { try? decryptor.close() }
-            try extract(from: decryptor, into: directory)
+            try extract(from: decryptor, into: directory, only: only)
         } else {
             // The header probe consumed bytes, so the unencrypted path reads from a fresh stream.
             guard let plain = fileStream(file),
@@ -97,30 +112,57 @@ enum BackupArchive {
                 try? decompressor.close()
                 try? plain.close()
             }
-            try extract(from: decompressor, into: directory)
+            try extract(from: decompressor, into: directory, only: only)
         }
         guard !containsSymbolicLink(directory) else { throw ArchiveError.cannotRead }
     }
 
-    /// AEA accepts 20–256 bytes; a digest fits any typed passphrase while scrypt still sets the cost.
-    static func archivePassword(for passphrase: String) -> String {
-        let normalized = Data(passphrase.precomposedStringWithCanonicalMapping.utf8)
-        let digest = SHA256.hash(data: Data("tinycast-backup-passphrase-v1:".utf8) + normalized)
-        return digest.map { String(format: "%02x", $0) }.joined()
+    /// Hex PBKDF2 of the NFC passphrase: any length fits AEA's 20–256 bytes, and guesses cost more.
+    static func archivePassword(for passphrase: String, salt: [UInt8], rounds: UInt32) -> String {
+        let normalized = Array(passphrase.precomposedStringWithCanonicalMapping.utf8)
+        let saltBytes = Array("tinycast-backup-passphrase-v1:".utf8) + salt
+        var derived = [UInt8](repeating: 0, count: 32)
+        let status = normalized.withUnsafeBufferPointer { password in
+            password.withMemoryRebound(to: CChar.self) { password in
+                CCKeyDerivationPBKDF(
+                    CCPBKDFAlgorithm(kCCPBKDF2), password.baseAddress, password.count, saltBytes,
+                    saltBytes.count, CCPseudoRandomAlgorithm(kCCPRFHmacAlgSHA256), rounds, &derived,
+                    derived.count)
+            }
+        }
+        precondition(status == kCCSuccess, "PBKDF2 refused its own fixed parameters")
+        return derived.map { String(format: "%02x", $0) }.joined()
     }
 
-    private static func encryptionContext(passphrase: String) throws -> ArchiveEncryptionContext {
+    /// The salt and rounds ride in AEA's authenticated header, readable before the passphrase is.
+    static func encryptionContext(
+        passphrase: String, rounds: UInt32
+    ) throws -> ArchiveEncryptionContext {
         guard passphrase.count >= minimumPassphraseLength else {
             throw ArchiveError.passphraseTooShort
+        }
+        var salt = [UInt8](repeating: 0, count: 16)
+        guard SecRandomCopyBytes(kSecRandomDefault, salt.count, &salt) == errSecSuccess else {
+            throw ArchiveError.cannotWrite
         }
         let context = ArchiveEncryptionContext(
             profile: .hkdf_sha256_aesctr_hmac__scrypt__none, compressionAlgorithm: .lzfse)
         do {
-            try context.setPassword(archivePassword(for: passphrase))
+            context.authData = Data(stretchMagic + withUnsafeBytes(of: rounds.bigEndian, Array.init) + salt)
+            try context.setPassword(archivePassword(for: passphrase, salt: salt, rounds: rounds))
         } catch {
             throw ArchiveError.cannotWrite
         }
         return context
+    }
+
+    private static func parseStretch(_ data: Data) -> (salt: [UInt8], rounds: UInt32)? {
+        let bytes = Array(data)
+        guard bytes.count == stretchMagic.count + 4 + 16, Array(bytes.prefix(stretchMagic.count)) == stretchMagic
+        else { return nil }
+        let rounds = bytes[stretchMagic.count..<stretchMagic.count + 4].reduce(UInt32(0)) { $0 << 8 | UInt32($1) }
+        guard acceptedRounds.contains(rounds) else { return nil }
+        return (Array(bytes.suffix(16)), rounds)
     }
 
     private static func fileStream(_ file: URL) -> ArchiveByteStream? {
@@ -128,14 +170,21 @@ enum BackupArchive {
             path: FilePath(file.path), mode: .readOnly, options: [], permissions: [])
     }
 
-    private static func extract(from stream: ArchiveByteStream, into directory: URL) throws {
+    private static func extract(
+        from stream: ArchiveByteStream, into directory: URL, only: Set<String>?
+    ) throws {
         guard let decoder = ArchiveStream.decodeStream(readingFrom: stream) else {
             throw ArchiveError.cannotRead
         }
         defer { try? decoder.close() }
+        let free =
+            (try? directory.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]))?
+            .volumeAvailableCapacityForImportantUsage ?? 0
+        let budget = ExtractionBudget(bytes: max(0, min(maximumBytes, free - (1 << 30))))
         do {
             try ArchiveStream.withExtractStream(
-                extractingTo: FilePath(directory.path), selectUsing: containedEntry
+                extractingTo: FilePath(directory.path),
+                selectUsing: { budget.admit($0, $1, $2, only: only) }
             ) { extractor in
                 _ = try ArchiveStream.process(readingFrom: decoder, writingTo: extractor)
             }
@@ -158,14 +207,35 @@ enum BackupArchive {
         return false
     }
 
-    /// Skips any entry naming an absolute path or `..`, so a hostile archive cannot escape.
-    private static func containedEntry(
-        _ message: ArchiveHeader.EntryMessage, _ path: FilePath,
-        _ data: ArchiveHeader.EntryFilterData?
-    ) -> ArchiveHeader.EntryMessageStatus {
-        guard !path.isAbsolute, !path.components.contains(where: { $0.string == ".." }) else {
-            return .skip
+    /// Counts as entries are extracted, so a hostile archive can neither fill the disk nor hang it.
+    private final class ExtractionBudget {
+        private var entries = 0
+        private var bytes: Int64
+
+        init(bytes: Int64) {
+            self.bytes = bytes
         }
-        return .ok
+
+        /// Only files and folders, inside the destination: a FIFO would block extraction forever.
+        func admit(
+            _ message: ArchiveHeader.EntryMessage, _ path: FilePath,
+            _ data: ArchiveHeader.EntryFilterData?, only: Set<String>?
+        ) -> ArchiveHeader.EntryMessageStatus {
+            guard !path.isAbsolute, !path.components.contains(where: { $0.string == ".." }) else {
+                return .skip
+            }
+            guard message == .extractBegin else { return .ok }
+            guard case .header(let header) = data,
+                case .uint(_, let type) = header.field(forKey: ArchiveHeader.FieldKey("TYP")),
+                type == UInt64(ArchiveHeader.EntryType.regularFile.rawValue)
+                    || type == UInt64(ArchiveHeader.EntryType.directory.rawValue)
+            else { return .cancel }
+            if let only, !path.isEmpty, !only.contains(path.string) { return .skip }
+            entries += 1
+            if case .blob(_, let size, _) = header.field(forKey: ArchiveHeader.FieldKey("DAT")) {
+                bytes -= Int64(clamping: size)
+            }
+            return entries <= BackupArchive.maximumEntries && bytes >= 0 ? .ok : .cancel
+        }
     }
 }

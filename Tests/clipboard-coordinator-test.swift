@@ -273,10 +273,10 @@ enum ClipboardTextWorker {
 }
 
 enum ClipboardKeyStore {
-    enum Failure: LocalizedError { case locked }
+    enum Failure: LocalizedError, Sendable { case locked, conversionFailed }
     enum Unlock: Sendable {
         case ready(ClipboardCipher)
-        case unavailable
+        case unavailable(Failure)
     }
     static func unlock(database: URL, images: URL) -> Unlock { .ready(.harness) }
 }

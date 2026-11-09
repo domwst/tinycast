@@ -31,6 +31,7 @@
 		067A064C013F0F66208E7DB1 /* KeychainSecretStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC02192DE787DBE081C589B8 /* KeychainSecretStore.swift */; };
 		06B25F0B7A2B2D887A9B62FC /* WindowLayoutDraft.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D9C37A9079B2BE573136DFF /* WindowLayoutDraft.swift */; };
 		06BA73AE917A8595DF18E8E1 /* NoteMarkdownParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C3F123266ED0DA4BC9616B9 /* NoteMarkdownParser.swift */; };
+		06E0FD211F03C7E69CFA7D2B /* RaycastImagePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CDBCC4EAAE3A1CB7D39D111 /* RaycastImagePolicy.swift */; };
 		07059C7E22C28A9E1E99F1DE /* NoteHeadingMenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31569E535614FE2F82880C09 /* NoteHeadingMenuView.swift */; };
 		07726F26DC68689F8984F467 /* Scrypt.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91D0784E49BC5899A585F285 /* Scrypt.swift */; };
 		0820C7539E3328338C3C8FBD /* BarButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4395BACF833C810961A248F0 /* BarButton.swift */; };
@@ -1172,6 +1173,7 @@
 		3BA9F5F7226AD5A91835AF5C /* LaunchAtLogin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchAtLogin.swift; sourceTree = "<group>"; };
 		3C021D578082B4FE98D27CAC /* SpaceSwitcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpaceSwitcher.swift; sourceTree = "<group>"; };
 		3C504229760FFFFA9D8A7799 /* SettingsHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsHistory.swift; sourceTree = "<group>"; };
+		3CDBCC4EAAE3A1CB7D39D111 /* RaycastImagePolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RaycastImagePolicy.swift; sourceTree = "<group>"; };
 		3E16AEF81320A101E384098E /* KeyShortcut.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyShortcut.swift; sourceTree = "<group>"; };
 		3E4A7E45F7D1CC5FB8868715 /* SearchScopes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchScopes.swift; sourceTree = "<group>"; };
 		3E81B4C409EBB4D3D0DECD47 /* CalcGrowth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalcGrowth.swift; sourceTree = "<group>"; };
@@ -2843,6 +2845,7 @@
 				E20A7C8EADDB7F89A73796CC /* BackupComposer.swift */,
 				B620894347E87EC4130CA4C8 /* BackupStaging.swift */,
 				9DA2AB248B239E2EF9276187 /* RaycastDecoder.swift */,
+				3CDBCC4EAAE3A1CB7D39D111 /* RaycastImagePolicy.swift */,
 				8CD7591D273A6484DD48018A /* RaycastImportReader.swift */,
 				91D0784E49BC5899A585F285 /* Scrypt.swift */,
 			);
@@ -4834,6 +4837,7 @@
 				39F5A11DD9D7C31AC720D4C0 /* QuicklinksSettingsView.swift in Sources */,
 				09C2F66D963E4E07A5A4F346 /* RaycastClipboardImport.swift in Sources */,
 				EBFD65E82A7633ECB132A4D4 /* RaycastDecoder.swift in Sources */,
+				06E0FD211F03C7E69CFA7D2B /* RaycastImagePolicy.swift in Sources */,
 				A5354210CDCB796D2D988B82 /* RaycastImport.swift in Sources */,
 				A79B7385C6B6E6C67FDFB152 /* RaycastImportError.swift in Sources */,
 				46F5D522E6F5470D3694A218 /* RaycastImportReader.swift in Sources */,

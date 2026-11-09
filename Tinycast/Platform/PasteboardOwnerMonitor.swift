@@ -6,10 +6,14 @@ final class PasteboardOwnerMonitor: Sendable {
     struct Owner: Sendable, Equatable {
         let pid: pid_t
         let process: String
+        /// Resolved as the line arrives, since a short-lived writer may be gone by the next poll.
+        var executable: String?
     }
 
     /// What `NSPasteboard.general` is called inside `pboard`; its generation is `changeCount`.
     static let generalPasteboardName = "Apple CFPasteboard general"
+    /// The daemon itself, by path: a process merely named `pboard` must not speak for it.
+    static let daemonPath = "/usr/libexec/pboard"
 
     /// Injected so a harness can watch a pasteboard of its own rather than the reader's clipboard.
     let pasteboardName: String
@@ -19,7 +23,8 @@ final class PasteboardOwnerMonitor: Sendable {
     }
 
     var predicate: String {
-        "process == \"pboard\" AND eventMessage BEGINSWITH \"\(pasteboardName) has new generation \""
+        "processImagePath == \"\(Self.daemonPath)\" AND eventMessage BEGINSWITH "
+            + "\"\(pasteboardName) has new generation \""
     }
 
     private static let retainedGenerations = 64
@@ -27,6 +32,14 @@ final class PasteboardOwnerMonitor: Sendable {
     private static let minimumHealthyLifetime: TimeInterval = 5
     private static let maximumQuickFailures = 3
     private static let restartDelay: TimeInterval = 10
+    /// Past any line `pboard` writes; a longer one is dropped rather than buffered.
+    private static let maximumLineBytes = 16 * 1024
+
+    /// Two different owners claimed for one generation means one was forged: neither is trusted.
+    private enum Record: Sendable {
+        case owner(Owner)
+        case conflicted
+    }
 
     private struct State: ~Copyable {
         var process: Process?
@@ -34,7 +47,7 @@ final class PasteboardOwnerMonitor: Sendable {
         var streaming = false
         var quickFailures = 0
         var buffer = Data()
-        var owners: [Int: Owner] = [:]
+        var records: [Int: Record] = [:]
         var order: [Int] = []
     }
 
@@ -47,8 +60,12 @@ final class PasteboardOwnerMonitor: Sendable {
     /// True while a stream is running, so a caller may wait one beat for a generation's line.
     var isStreaming: Bool { state.withLock { $0.streaming } }
 
+    /// nil when no line named the generation, or more than one owner claimed it.
     func owner(ofGeneration generation: Int) -> Owner? {
-        state.withLock { $0.owners[generation] }
+        state.withLock { state in
+            guard case .owner(let owner) = state.records[generation] else { return nil }
+            return owner
+        }
     }
 
     func start() {
@@ -65,8 +82,9 @@ final class PasteboardOwnerMonitor: Sendable {
         let process = state.withLock { state -> Process? in
             state.wanted = false
             state.streaming = false
-            state.owners = [:]
+            state.records = [:]
             state.order = []
+            state.buffer = Data()
             defer { state.process = nil }
             return state.process
         }
@@ -83,38 +101,42 @@ final class PasteboardOwnerMonitor: Sendable {
         process.standardOutput = output
         process.standardError = FileHandle.nullDevice
         process.standardInput = FileHandle.nullDevice
+        let identity = ObjectIdentifier(process)
         output.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let chunk = handle.availableData
             guard !chunk.isEmpty else {
                 handle.readabilityHandler = nil
                 return
             }
-            self?.receive(chunk)
+            self?.receive(chunk, from: identity)
         }
         let launched = Date()
         process.terminationHandler = { [weak self] _ in
             output.fileHandleForReading.readabilityHandler = nil
-            self?.ended(after: Date().timeIntervalSince(launched))
+            self?.ended(identity, after: Date().timeIntervalSince(launched))
         }
         let accepted = state.withLock { state -> Bool in
             guard state.wanted, state.process == nil else { return false }
             state.process = process
+            state.buffer = Data()
             return true
         }
         guard accepted else { return }
         do {
             try process.run()
-            state.withLock { $0.streaming = $0.process === process }
+            state.withLock { $0.streaming = $0.process.map(ObjectIdentifier.init) == identity }
         } catch {
             state.withLock { state in
-                if state.process === process { state.process = nil }
+                if state.process.map(ObjectIdentifier.init) == identity { state.process = nil }
                 state.wanted = false
             }
         }
     }
 
-    private func ended(after lifetime: TimeInterval) {
+    /// Only the current stream's exit counts: a superseded one must not clear its successor.
+    private func ended(_ identity: ObjectIdentifier, after lifetime: TimeInterval) {
         let retry = state.withLock { state -> Bool in
+            guard state.process.map(ObjectIdentifier.init) == identity else { return false }
             state.process = nil
             state.streaming = false
             state.buffer = Data()
@@ -136,44 +158,79 @@ final class PasteboardOwnerMonitor: Sendable {
         launch()
     }
 
-    private func receive(_ chunk: Data) {
-        state.withLock { state in
+    private func receive(_ chunk: Data, from identity: ObjectIdentifier) {
+        let lines = state.withLock { state -> [Data] in
+            guard state.process.map(ObjectIdentifier.init) == identity else { return [] }
             state.buffer.append(chunk)
+            var lines: [Data] = []
             while let newline = state.buffer.firstIndex(of: 0x0A) {
-                let line = state.buffer[state.buffer.startIndex..<newline]
+                lines.append(state.buffer[state.buffer.startIndex..<newline])
                 state.buffer.removeSubrange(state.buffer.startIndex...newline)
-                guard let (generation, owner) = Self.parse(line: line, pasteboard: pasteboardName)
-                else { continue }
-                if state.owners.updateValue(owner, forKey: generation) == nil {
-                    state.order.append(generation)
-                }
-                if state.order.count > Self.retainedGenerations {
-                    state.owners[state.order.removeFirst()] = nil
-                }
             }
+            if state.buffer.count > Self.maximumLineBytes { state.buffer = Data() }
+            return lines
+        }
+        // Parsed and resolved outside the lock: `proc_pidpath` is a syscall per line.
+        let parsed = lines.compactMap { line -> (Int, Owner)? in
+            guard line.count <= Self.maximumLineBytes,
+                let parsed = Self.parse(line: line, pasteboard: pasteboardName)
+            else { return nil }
+            var owner = parsed.owner
+            owner.executable = ProcessExecutable.path(of: owner.pid)
+            return (parsed.generation, owner)
+        }
+        guard !parsed.isEmpty else { return }
+        state.withLock { state in
+            guard state.process.map(ObjectIdentifier.init) == identity else { return }
+            for (generation, owner) in parsed { Self.record(owner, for: generation, in: &state) }
         }
     }
 
-    /// One `ndjson` event; anything else `log` prints, such as its banner, reads as nil.
+    private static func record(_ owner: Owner, for generation: Int, in state: inout State) {
+        switch state.records[generation] {
+        case nil:
+            state.records[generation] = .owner(owner)
+            state.order.append(generation)
+        case .owner(let existing) where existing.pid != owner.pid:
+            state.records[generation] = .conflicted
+        default:
+            break
+        }
+        if state.order.count > retainedGenerations {
+            state.records[state.order.removeFirst()] = nil
+        }
+    }
+
+    /// One `ndjson` event from the daemon itself; anything else `log` prints reads as nil.
     static func parse(line: Data, pasteboard: String) -> (generation: Int, owner: Owner)? {
         guard
             let event = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
+            event["processImagePath"] as? String == daemonPath,
             let message = event["eventMessage"] as? String
         else { return nil }
         return parse(message: message, pasteboard: pasteboard)
     }
 
+    /// Each marker exactly once: a name shaped like a second record makes the whole line ambiguous.
     static func parse(message: String, pasteboard: String) -> (generation: Int, owner: Owner)? {
-        let lead = pasteboard + " has new generation "
-        guard message.hasPrefix(lead),
-            let generationStart = message.range(of: lead)?.upperBound,
-            let generation = Int(message[generationStart...].prefix(while: \.isNumber)),
-            let processStart = message.range(of: " - process: ")?.upperBound,
-            let pidRange = message.range(of: " - pid: ", range: processStart..<message.endIndex),
-            let pid = pid_t(message[pidRange.upperBound...].prefix(while: \.isNumber)),
-            pid > 0
+        let markers = [" has new generation ", " with owner ", " - process: ", " - pid: "]
+        guard markers.allSatisfy({ message.components(separatedBy: $0).count == 2 }),
+            let generationMarker = message.range(of: markers[0]),
+            message[..<generationMarker.lowerBound] == pasteboard,
+            let ownerMarker = message.range(of: markers[1]),
+            let generation = Int(message[generationMarker.upperBound..<ownerMarker.lowerBound]),
+            let processMarker = message.range(of: markers[2]),
+            let pidMarker = message.range(of: markers[3]),
+            ownerMarker.upperBound <= processMarker.lowerBound,
+            processMarker.upperBound <= pidMarker.lowerBound
         else { return nil }
-        let process = String(message[processStart..<pidRange.lowerBound])
+        let tail = message[pidMarker.upperBound...]
+        let digits = tail.prefix(while: \.isNumber)
+        let rest = tail.dropFirst(digits.count)
+        guard let pid = pid_t(digits), pid > 0, rest.isEmpty || rest.hasPrefix(" - uuid: ") else {
+            return nil
+        }
+        let process = String(message[processMarker.upperBound..<pidMarker.lowerBound])
         return (generation, Owner(pid: pid, process: process))
     }
 }

@@ -5,8 +5,9 @@ private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.sel
 
 /// Seals a plaintext history from before encryption; skipping it costs that history, never a leak.
 nonisolated enum ClipboardEncryptionMigration {
-    /// Idempotent: a sealed store, a missing one, or a half-finished conversion all resolve here.
-    static func run(database: URL, images: URL, cipher: ClipboardCipher) {
+    /// Idempotent; false only when a plaintext history is still there because converting it failed.
+    @discardableResult
+    static func run(database: URL, images: URL, cipher: ClipboardCipher) -> Bool {
         let converting = URL(fileURLWithPath: database.path + ".converting")
         guard FileManager.default.fileExists(atPath: database.path) else {
             // Stopped between removing the old file and the swap: the new one is already complete.
@@ -15,22 +16,24 @@ nonisolated enum ClipboardEncryptionMigration {
             } else {
                 ClipboardStore.removeDatabase(at: converting)
             }
-            return
+            return true
         }
         guard userVersion(database) == 0, hasItems(database) else {
             ClipboardStore.removeDatabase(at: converting)
             // Stopped after the swap but before the old images went: finish that now.
             if isSealedStore(database) { removePlaintext(in: images) }
-            return
+            return true
         }
         ClipboardStore.removeDatabase(at: converting)
         guard convert(database, into: converting, images: images, cipher: cipher) else {
             ClipboardStore.removeDatabase(at: converting)
-            return
+            return false
         }
         ClipboardStore.removeDatabase(at: database)
-        guard rename(converting.path, database.path) == 0 else { return }
+        // The finished copy stays beside the missing original, which the next run completes.
+        guard rename(converting.path, database.path) == 0 else { return false }
         removePlaintext(in: images)
+        return true
     }
 
     /// A plaintext history, a conversion a crash interrupted, or its leftover images await `run`.
