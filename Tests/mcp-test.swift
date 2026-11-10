@@ -161,6 +161,8 @@ struct MCPTests {
 
         let structured = MCPToolOutput.flatten(JSONValue(["structuredContent": ["count": 2]]))
         expect(structured.content.contains("count"), "structured-only output is read as JSON")
+        let scalar = MCPToolOutput.flatten(JSONValue(["structuredContent": "x"]))
+        expect(scalar.content == "\"x\"", "a scalar a hostile server sends is read, not a crash")
         expect(
             MCPToolOutput.flatten(JSONValue([:])).content.isEmpty == false,
             "an empty answer still says something rather than nothing")

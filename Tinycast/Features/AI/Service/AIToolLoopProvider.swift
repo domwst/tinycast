@@ -14,14 +14,11 @@ struct AIToolLoopProvider: AIProvider {
     /// Each round replays prior output, including opaque reasoning, so its growth must be bounded.
     static let maxTurnHistoryBytes = 1_048_576
 
-    init(
-        base: any AIProvider, tools: [AITool], maxRounds: Int?,
-        invoke: @escaping @Sendable (AIToolCall) async -> AIToolResult
-    ) {
+    init(base: any AIProvider, session: AIToolSession) {
         self.base = base
-        self.tools = tools
-        self.maxRounds = maxRounds
-        self.invoke = invoke
+        tools = session.tools
+        maxRounds = session.maxCalls
+        invoke = session.invoke
     }
 
     func stream(_ request: AIRequest) -> AIProviderStream {

@@ -46,6 +46,7 @@ struct AIChatTests {
         singleToolCallsStaySingle()
         toolRunsDescribeTheirState()
         await theToolLoopRunsUntilTheModelStopsAsking()
+        await aCallOutsideTheOfferedToolsNeverRuns()
         await theToolLoopRefusesToRunForever()
         await anUnlimitedToolLoopRunsPastEveryStep()
         await anUnlimitedToolLoopStopsWhenItsHistoryIsFull()
@@ -315,6 +316,20 @@ struct AIChatTests {
             "paired with the assistant turn that asked for it, which no provider accepts orphaned")
     }
 
+    /// A model, or a page it read, may name any tool; only the ones this turn offered may run.
+    static func aCallOutsideTheOfferedToolsNeverRuns() async {
+        let base = ScriptedProvider(rounds: [
+            [.toolCallRequested(AIToolCall(id: "c1", name: "excluded__delete_all", arguments: "{}"))],
+            [.text("done"), .finished]
+        ])
+        let invoker = RecordingInvoker(result: "deleted")
+        let events = await collect(loop(base, invoker))
+        expect(invoker.calls.isEmpty, "a tool the turn never offered is not invoked")
+        expect(
+            events.contains(.toolResult(id: "c1", isError: true)),
+            "and the model is told the call failed")
+    }
+
     /// A model that only ever calls has stopped answering, and the turn has to end saying so.
     static func theToolLoopRefusesToRunForever() async {
         let round: [AIStreamEvent] = [
@@ -431,13 +446,14 @@ struct AIChatTests {
     ) -> AIToolLoopProvider {
         AIToolLoopProvider(
             base: base,
-            tools: [
-                AITool(
-                    name: "fs__read", description: "", parameters: .object([:]), origin: "Files",
-                    title: "read")
-            ],
-            maxRounds: maxRounds,
-            invoke: { call in await invoker.invoke(call) })
+            session: AIToolSession(
+                tools: [
+                    AITool(
+                        name: "fs__read", description: "", parameters: .object([:]), origin: "Files",
+                        title: "read")
+                ],
+                maxCalls: maxRounds,
+                invoke: { call in await invoker.invoke(call) }))
     }
 
     private static func collect(_ provider: AIToolLoopProvider) async -> [AIStreamEvent] {

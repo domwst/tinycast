@@ -170,7 +170,7 @@ struct ExtensionCommand: Sendable, Hashable, Identifiable {
 
     init?(json: Any) {
         guard let dict = json as? [String: Any], let name = dict["name"] as? String,
-            let title = dict["title"] as? String
+            let title = dict["title"] as? String, ExtensionManifest.isFileName(name)
         else { return nil }
         self.name = name
         self.title = title
@@ -227,6 +227,16 @@ struct ExtensionManifest: Sendable, Hashable {
         }
     }
 
+    /// npm-style names flattened to one path segment; a second copy that drifts orphans every file.
+    static func safeName(_ name: String) -> String {
+        name.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: "@", with: "")
+    }
+
+    /// Names become file and folder names, so one that is empty, hidden or `..` would escape.
+    static func isFileName(_ name: String) -> Bool {
+        !name.isEmpty && !name.hasPrefix(".") && !name.contains("/") && !name.contains("\0")
+    }
+
     static func load(directory: URL) throws -> ExtensionManifest {
         let manifestURL = directory.appendingPathComponent("package.json")
         guard let data = try? Data(contentsOf: manifestURL) else {
@@ -239,7 +249,9 @@ struct ExtensionManifest: Sendable, Hashable {
     }
 
     init?(json: [String: Any]) {
-        guard let name = json["name"] as? String else { return nil }
+        guard let name = json["name"] as? String, Self.isFileName(Self.safeName(name)),
+            Self.isFileName(name.replacingOccurrences(of: "/", with: "-"))
+        else { return nil }
         let commands = (json["commands"] as? [Any] ?? []).compactMap(ExtensionCommand.init(json:))
         guard !commands.isEmpty else { return nil }
         self.name = name

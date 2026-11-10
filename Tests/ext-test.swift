@@ -197,6 +197,7 @@ struct ExtensionTests {
         actionIconChecks()
         deepLinkChecks()
         nodeShimChecks()
+        installGuardChecks()
         await runtimeChecks()
         await bundledModuleChecks()
         await navigationSearchRuntimeChecks()
@@ -259,6 +260,45 @@ struct ExtensionTests {
         } catch {
             check("bundled module fixture completes", false, String(describing: error))
         }
+    }
+
+    static func installGuardChecks() {
+        let fm = FileManager.default
+        let base = fm.temporaryDirectory
+            .appendingPathComponent("ext-install-guard-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: base) }
+        let installed = base.appendingPathComponent("installed", isDirectory: true)
+        let sentinel = base.appendingPathComponent("sentinel")
+        func source(named name: String) -> URL {
+            let folder = base.appendingPathComponent("source-\(UUID().uuidString)", isDirectory: true)
+            try? fm.createDirectory(at: folder, withIntermediateDirectories: true)
+            let manifest: [String: Any] = ["name": name, "title": "T", "commands": [["name": "main", "title": "Main"]]]
+            try? JSONSerialization.data(withJSONObject: manifest)
+                .write(to: folder.appendingPathComponent("package.json"))
+            try? Data("module.exports.default = () => null;".utf8)
+                .write(to: folder.appendingPathComponent("main.js"))
+            return folder
+        }
+        do {
+            try fm.createDirectory(at: installed, withIntermediateDirectories: true)
+            try Data("keep".utf8).write(to: sentinel)
+        } catch {
+            check("install guard fixture builds", false, String(describing: error))
+            return
+        }
+        let parent = try? ExtensionCatalog.install(from: source(named: ".."), in: installed)
+        check(
+            "a manifest named .. never installs over its parent",
+            parent == nil && fm.fileExists(atPath: sentinel.path))
+        let swapped = try? ExtensionCatalog.install(
+            from: source(named: "other"), in: installed, expecting: ("listed", "Listed"))
+        check(
+            "a store download must be the extension it was listed as",
+            swapped == nil
+                && !fm.fileExists(atPath: installed.appendingPathComponent("other").path))
+        let listed = try? ExtensionCatalog.install(
+            from: source(named: "listed"), in: installed, expecting: ("listed", "Listed"))
+        check("the listed extension still installs", listed?.manifest.name == "listed")
     }
 
     static func nodeShimChecks() {
@@ -482,6 +522,18 @@ struct ExtensionTests {
             "and anyone else's under its author",
             ExtensionManifest(json: ["name": "a", "author": "me", "commands": commands])?.storeHandle
                 == "me")
+        for name in ["..", ".", "", "@", "@.x", ".hidden"] {
+            check(
+                "rejects the manifest name \"\(name)\", which would escape its folder",
+                ExtensionManifest(json: ["name": name, "commands": commands]) == nil)
+        }
+        check(
+            "keeps a scoped manifest name",
+            ExtensionManifest(json: ["name": "@scope/thing", "commands": commands]) != nil)
+        let escaping = commands + [["name": "../x", "title": "X"], ["name": "..", "title": "Y"]]
+        check(
+            "drops a command whose name would leave its folder",
+            ExtensionManifest(json: ["name": "a", "commands": escaping])?.commands.map(\.name) == ["c"])
 
         // Launcher round-trip: an entry id must decode back to the same command.
         let reference = ExtensionCommandRef(extensionName: "@scope/demo", commandName: "search")

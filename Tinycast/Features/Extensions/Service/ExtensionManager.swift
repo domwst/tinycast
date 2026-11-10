@@ -58,9 +58,10 @@ final class ExtensionManager: ExtensionRuntimeDelegate, ExtensionHostContext {
     @ObservationIgnored private var backgroundTask: Task<Void, Never>?
     @ObservationIgnored private var nextToastID = 1
     @ObservationIgnored private var searchState = ExtensionSearchState()
+    @ObservationIgnored private var secretsMigrated = false
 
     init(clipboardStore: ClipboardStore) {
-        storage = ExtensionStorage(directory: ExtensionCatalog.storageDirectory())
+        storage = ExtensionStorage(directory: ExtensionCatalog.storageDirectory(), vault: .keychain)
         bridge = ExtensionHostBridge(clipboardStore: clipboardStore)
         runtime = ExtensionRuntime(hostAPI: bridge)
         bridge.context = self
@@ -132,6 +133,11 @@ final class ExtensionManager: ExtensionRuntimeDelegate, ExtensionHostContext {
         guard isEnabled else { return }
         let found = await Task.detached(priority: .utility) { ExtensionCatalog.scan() }.value
         guard isEnabled else { return }
+        if !secretsMigrated {
+            secretsMigrated = true
+            ExtensionSecretsMigration.run(
+                storage: storage, installed: found, directory: ExtensionCatalog.storageDirectory())
+        }
         if found != installed {
             installed = found
             publishLauncherEntries()

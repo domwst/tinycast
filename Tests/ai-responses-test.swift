@@ -204,9 +204,10 @@ struct AIResponsesTests {
             try completed(first), try completed(second),
             try frame(["type": "response.output_text.delta", "delta": "done"]) + completed([])
         ])
-        let provider = AIToolLoopProvider(base: base, tools: [tool], maxRounds: 3) { call in
+        let session = AIToolSession(tools: [tool], maxCalls: 3) { call in
             AIToolResult(callID: call.id, content: "file contents", isError: false)
         }
+        let provider = AIToolLoopProvider(base: base, session: session)
         var events: [AIStreamEvent] = []
         let request = AIRequest(instructions: "Brief", messages: [AIMessage(role: .user, text: "read")])
         for try await event in provider.stream(request) { events.append(event) }
@@ -242,9 +243,9 @@ struct AIResponsesTests {
         let limits: [Int?] = [nil, 25]
         for limit in limits {
             let base = ResponsesFixtureProvider(replies: [try completed(output), try completed([])])
-            let provider = AIToolLoopProvider(base: base, tools: [tool], maxRounds: limit) { call in
+            let provider = AIToolLoopProvider(base: base, session: AIToolSession(tools: [tool], maxCalls: limit) { call in
                 AIToolResult(callID: call.id, content: "ok", isError: false)
-            }
+            })
             do {
                 for try await _ in provider.stream(AIRequest(messages: [])) {}
                 expect(false, "opaque reasoning must not bypass the turn budget")
@@ -264,11 +265,11 @@ struct AIResponsesTests {
         let base = ResponsesFixtureProvider(replies: [
             (try? completed(outputItems(callID: "first") + outputItems(callID: "second"))) ?? Data()
         ])
-        let provider = AIToolLoopProvider(base: base, tools: [tool], maxRounds: 3) { call in
+        let provider = AIToolLoopProvider(base: base, session: AIToolSession(tools: [tool], maxCalls: 3) { call in
             invoked.withLock { $0 += 1 }
             try? await Task.sleep(for: .seconds(30))
             return AIToolResult(callID: call.id, content: "cancelled", isError: false)
-        }
+        })
         let task = Task {
             for try await _ in provider.stream(AIRequest(messages: [])) {}
         }

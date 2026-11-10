@@ -107,7 +107,7 @@ struct HTTPAIProvider: AIProvider {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.urlCache = nil
         configuration.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
-        return URLSession(configuration: configuration)
+        return URLSession(configuration: configuration, delegate: AIRedirectPolicy(), delegateQueue: nil)
     }
 
     /// A refusal's body comes with its headers; the status is never held longer than this for one.

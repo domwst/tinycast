@@ -7,7 +7,7 @@ final class AIModelDiscoveryService: Sendable {
         configuration.urlCache = nil
         configuration.httpCookieStorage = nil
         configuration.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
-        return URLSession(configuration: configuration)
+        return URLSession(configuration: configuration, delegate: AIRedirectPolicy(), delegateQueue: nil)
     }()
 
     func models(

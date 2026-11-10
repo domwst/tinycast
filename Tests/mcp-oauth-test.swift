@@ -587,6 +587,27 @@ struct MCPOAuthTests {
             expect(false, "a cross-origin redirect must not be followed")
         } catch { expect(true, "a cross-origin redirect is refused") }
         away.close()
+        var withdrawing: MCPHTTPTransport?
+        let withdrawn = try MCPHTTPTransport(url: base + "/mcp", headerName: "", headerValue: "") { _ in
+            withdrawing?.close()
+            return "fixture-access"
+        }
+        withdrawing = withdrawn
+        try await withdrawn.connect()
+        do {
+            _ = try await withdrawn.request("tools/list")
+            expect(false, "a transport closed while its token was fetched must not send")
+        } catch {
+            if case MCPTransportError.notRunning = error {
+                expect(true, "a transport closed while its token was fetched sends nothing")
+            } else {
+                expect(false, "a transport closed mid-request fails as closed, got \(error)")
+            }
+        }
+        do {
+            try await withdrawn.connect()
+            expect(false, "a closed transport stays closed")
+        } catch { expect(true, "a closed transport stays closed") }
         var redirected = URLRequest(url: URL(string: base + "/redirect")!)
         redirected.setValue("Bearer fixture-access", forHTTPHeaderField: "Authorization")
         let (_, response) = try await MCPOAuthHTTP.send(redirected)

@@ -30,7 +30,7 @@ final class MCPServerConnection {
     }
 
     func start() async {
-        guard isIdle else { return }
+        guard isIdle, !Task.isCancelled else { return }
         status = .connecting
         let generation = generation
         do {

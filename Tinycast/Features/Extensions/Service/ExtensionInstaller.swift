@@ -41,7 +41,8 @@ struct ExtensionInstaller: Sendable {
     func install(
         _ listing: ExtensionListing, onProgress: @Sendable @escaping (Progress) -> Void
     ) async throws -> InstalledExtension {
-        try await inWorkspace(onProgress: onProgress) { workspace in
+        let expected = (name: listing.name, title: listing.title)
+        return try await inWorkspace(onProgress: onProgress, expecting: expected) { workspace in
             onProgress(.downloading)
             return try await preparePrebuilt(from: listing.downloadURL, in: workspace)
         }
@@ -65,7 +66,8 @@ struct ExtensionInstaller: Sendable {
 
     /// Copies into place before the workspace goes, so it hands back the install.
     private func inWorkspace(
-        onProgress: (Progress) -> Void, prepare: (URL) async throws -> URL
+        onProgress: (Progress) -> Void, expecting listing: (name: String, title: String)? = nil,
+        prepare: (URL) async throws -> URL
     ) async throws -> InstalledExtension {
         let workspace = ExtensionCleanup.workspace(in: FileManager.default.temporaryDirectory)
         try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
@@ -73,7 +75,7 @@ struct ExtensionInstaller: Sendable {
 
         let prepared = try await prepare(workspace)
         onProgress(.installing)
-        return try ExtensionCatalog.install(from: prepared)
+        return try ExtensionCatalog.install(from: prepared, expecting: listing)
     }
 
     // MARK: - Prebuilt

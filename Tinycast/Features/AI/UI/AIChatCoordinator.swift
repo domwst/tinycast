@@ -388,9 +388,7 @@ final class AIChatCoordinator {
         if case .openCode? = model(for: chat) {
             return try provider(for: chat, toolSession: session)
         }
-        return AIToolLoopProvider(
-            base: try provider(for: chat), tools: session.tools, maxRounds: session.maxCalls,
-            invoke: session.invoke)
+        return AIToolLoopProvider(base: try provider(for: chat), session: session)
     }
 
     /// The same narrowing as `tools(for:scopedTo:)`, for a client that starts its own servers.

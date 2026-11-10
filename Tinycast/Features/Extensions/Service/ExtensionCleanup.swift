@@ -69,7 +69,7 @@ enum ExtensionCleanup {
 
     /// Narrow by construction: three roots, and inside them only what names itself ours or nothing.
     private nonisolated static func strays(installed: Set<String>, in roots: Roots) -> [URL] {
-        let safe = Set(installed.map(ExtensionCatalog.safeName))
+        let safe = Set(installed.map(ExtensionManifest.safeName))
         let orphanedSupport = contents(of: roots.support).filter {
             !safe.contains($0.lastPathComponent)
         }

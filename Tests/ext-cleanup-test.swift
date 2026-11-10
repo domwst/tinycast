@@ -91,8 +91,8 @@ struct ExtensionCleanupTests {
         let (roots, base) = makeRoots()
         defer { try? FileManager.default.removeItem(at: base) }
 
-        makeDirectory(roots.support, ExtensionCatalog.safeName("@scope/thing"))
-        makeFile(roots.data, "\(ExtensionCatalog.safeName("@scope/thing")).json")
+        makeDirectory(roots.support, ExtensionManifest.safeName("@scope/thing"))
+        makeFile(roots.data, "\(ExtensionManifest.safeName("@scope/thing")).json")
 
         let report = ExtensionCleanup.clean(installed: ["@scope/thing"], in: roots)
 

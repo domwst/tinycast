@@ -121224,6 +121224,58 @@
         }
       }
     },
+    "The download isn't the extension the store listed as %@." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Download ist nicht die Erweiterung, die der Store als %@ aufgeführt hat."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La descarga no es la extensión que la tienda mostraba como %@."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Le téléchargement n’est pas l’extension que la boutique présentait comme %@."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ダウンロードしたものは、ストアに %@ として掲載されている拡張機能ではありません。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다운로드한 항목이 스토어에 %@(으)로 등록된 확장 프로그램이 아닙니다."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O download não é a extensão que a loja listou como %@."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Загруженный файл — не то расширение, которое магазин показывал как %@."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下载的内容不是商店中列为 %@ 的扩展。"
+          }
+        }
+      }
+    },
     "The downloaded app is not signed by the identity this copy was signed with." : {
       "localizations" : {
         "de" : {

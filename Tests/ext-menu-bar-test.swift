@@ -9,7 +9,9 @@ extension ExtensionTests {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
             "tinycast-live-menu-\(UUID())")
         defer { try? FileManager.default.removeItem(at: directory) }
-        let storage = ExtensionStorage(directory: directory.appendingPathComponent("storage"))
+        let storage = ExtensionStorage(
+            directory: directory.appendingPathComponent("storage"),
+            vault: ExtensionSecretVault(values: { _ in [:] }, save: { _, _ in }))
         for (key, value) in environmentPreferences() {
             storage.setPreference(extension: owner.manifest.name, key: key, value: value)
         }
@@ -482,7 +484,9 @@ extension ExtensionTests {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
             "tinycast-menu-\(UUID())")
         defer { try? FileManager.default.removeItem(at: directory) }
-        let storage = ExtensionStorage(directory: directory.appendingPathComponent("storage"))
+        let storage = ExtensionStorage(
+            directory: directory.appendingPathComponent("storage"),
+            vault: ExtensionSecretVault(values: { _ in [:] }, save: { _, _ in }))
         let source = #"""
             const React = require("react");
             const { MenuBarExtra, LocalStorage, environment, confirmAlert } = require("@raycast/api");

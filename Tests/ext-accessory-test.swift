@@ -5,7 +5,7 @@ enum ExtensionRuntime {
     static func jsonArray(from json: String) -> [Any] { [] }
 }
 
-enum ExtensionCatalog {
+enum ExtensionManifest {
     static func safeName(_ name: String) -> String { name }
 }
 
@@ -14,10 +14,21 @@ enum ExtensionPreferenceValue: Equatable {
     case number(Double)
     case bool(Bool)
     case application(String)
+
+    var stringValue: String {
+        switch self {
+        case .string(let value), .application(let value): value
+        case .number(let value): String(value)
+        case .bool(let value): value ? "true" : "false"
+        }
+    }
 }
 
 struct ExtensionPreferenceSchema {
+    enum Kind { case textfield, password }
+
     let name: String
+    var kind = Kind.textfield
     let required: Bool
     let effectiveDefault: ExtensionPreferenceValue
 
@@ -39,6 +50,7 @@ struct ExtensionSearchAccessoryTests {
         seeding()
         storageIsolation()
         formValueStorage()
+        secretStorage()
         print(failures == 0 ? "\nALL PASSED" : "\n\(failures) FAILED")
         print("\(passes) passed, \(failures) failed")
         exit(failures == 0 ? 0 : 1)
@@ -154,11 +166,78 @@ struct ExtensionSearchAccessoryTests {
                 ).node("searchBarAccessory"))?.initialValue(stored: nil) == nil)
     }
 
+    /// Keychain-shaped but in memory: no harness touches the real Keychain.
+    final class MemoryVault: @unchecked Sendable {
+        var items: [String: [String: String]] = [:]
+        var refuses = false
+
+        var vault: ExtensionSecretVault {
+            ExtensionSecretVault(
+                values: { [unowned self] name in
+                    if refuses { throw CocoaError(.fileReadNoPermission) }
+                    return items[name] ?? [:]
+                },
+                save: { [unowned self] values, name in
+                    if refuses { throw CocoaError(.fileWriteNoPermission) }
+                    items[name] = values.isEmpty ? nil : values
+                })
+        }
+    }
+
+    static let memory = MemoryVault()
+    static var vault: ExtensionSecretVault { memory.vault }
+
+    static func secretStorage() {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tinycast-ext-secrets-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let backing = MemoryVault()
+        let storage = ExtensionStorage(directory: directory, vault: backing.vault)
+        let password = ExtensionPreferenceSchema(
+            name: "apiKey", kind: .password, required: true, effectiveDefault: .string(""))
+        let marker = "secret-\(UUID().uuidString)"
+        storage.setPreference(extension: "sample", schema: password, value: .string(marker))
+        storage.setOAuthTokens(extension: "sample", provider: "github", tokens: marker + "-token")
+        storage.setLocalStorage(extension: "sample", key: "kept", value: .string("value"))
+        storage.flush()
+        let file = (try? String(
+            contentsOf: directory.appendingPathComponent("sample.json"), encoding: .utf8)) ?? ""
+        check("a password and a token never reach the file", !file.isEmpty && !file.contains(marker))
+        let reloaded = ExtensionStorage(directory: directory, vault: backing.vault)
+        check(
+            "a password reads back from the vault",
+            reloaded.preference(extension: "sample", schema: password) == .string(marker))
+        check(
+            "a token set reads back from the vault",
+            reloaded.oauthTokens(extension: "sample", provider: "github") == marker + "-token")
+        check(
+            "a required password counts as set",
+            reloaded.missingRequiredPreferences(extension: "sample", schemas: [password]).isEmpty)
+
+        storage.setPreference(extension: "legacy", key: "apiKey", value: .string("plain"))
+        check(
+            "a password an older build left in the file is never read as one",
+            storage.preference(extension: "legacy", schema: password) == nil)
+
+        backing.refuses = true
+        let locked = ExtensionStorage(directory: directory, vault: backing.vault)
+        check(
+            "a refused write reports it",
+            !locked.setPreference(extension: "sample", schema: password, value: .string("new")))
+        backing.refuses = false
+        check(
+            "and a locked read was not cached as empty",
+            locked.preference(extension: "sample", schema: password) == .string(marker))
+
+        reloaded.removeAll(extension: "sample")
+        check("uninstalling drops the vault item", backing.items["sample"] == nil)
+    }
+
     static func storageIsolation() {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("tinycast-ext-accessory-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: directory) }
-        let storage = ExtensionStorage(directory: directory)
+        let storage = ExtensionStorage(directory: directory, vault: vault)
         storage.setLocalStorage(extension: "sample", key: "filter", value: .string("extension-data"))
         storage.setAccessoryValue(extension: "sample", key: "filter", value: "selected")
         storage.setPreference(
@@ -171,7 +250,7 @@ struct ExtensionSearchAccessoryTests {
             storage.accessoryValue(extension: "sample", key: "filter") == "selected")
         storage.flush()
 
-        let reloaded = ExtensionStorage(directory: directory)
+        let reloaded = ExtensionStorage(directory: directory, vault: vault)
         check(
             "a pick survives a reload",
             reloaded.accessoryValue(extension: "sample", key: "filter") == "selected")
@@ -193,7 +272,7 @@ struct ExtensionSearchAccessoryTests {
                 try? data.write(to: file)
             }
         }
-        let older = ExtensionStorage(directory: directory)
+        let older = ExtensionStorage(directory: directory, vault: vault)
         check(
             "a store with no accessory section keeps its localStorage",
             older.localStorageValue(extension: "older", key: "kept") == .string("value"))
@@ -206,13 +285,13 @@ struct ExtensionSearchAccessoryTests {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("tinycast-ext-form-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: directory) }
-        let storage = ExtensionStorage(directory: directory)
+        let storage = ExtensionStorage(directory: directory, vault: vault)
         storage.setFormValues(extension: "sample", command: "generate", values: ["a": "1", "b": "2"])
         storage.setFormValues(extension: "sample", command: "generate", values: ["b": "3"])
         storage.setFormValues(extension: "sample", command: "other", values: ["a": "9"])
         storage.flush()
 
-        let reloaded = ExtensionStorage(directory: directory)
+        let reloaded = ExtensionStorage(directory: directory, vault: vault)
         check(
             "form values merge per field and survive a reload",
             reloaded.formValues(extension: "sample", command: "generate") == ["a": "1", "b": "3"])

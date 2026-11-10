@@ -1,7 +1,7 @@
 import AppKit
 import OSLog
 
-/// Runs built-in `tinycast://` links, never extension ones. See docs/features/deeplinks.md.
+/// Runs built-in `tinycast://` links and gates extension ones. See docs/features/deeplinks.md.
 @MainActor
 final class DeepLinkCoordinator {
     struct AllowedLink: Identifiable {
@@ -114,6 +114,10 @@ final class DeepLinkCoordinator {
 
     private func consentName(forKey key: String) -> String {
         if key == DeepLink.windowSizeHost { return String(localized: "Custom Size") }
+        if let link = DeepLinkConsentPolicy.extensionParts(ofKey: key) {
+            let name = hotKeys.displayName(of: .extensionCommand(entryID: link.entryID))
+            return link.summary.map { name + " · " + $0 } ?? name
+        }
         guard let parts = DeepLinkConsentPolicy.parts(ofKey: key),
             let action = parts.entryID == DeepLink.searchHost
                 ? .togglePalette : HotKeyAction(entryID: parts.entryID)
@@ -203,9 +207,27 @@ final class DeepLinkCoordinator {
         }
     }
 
-    /// One question at a time; a link arriving meanwhile is dropped, since nobody saw it.
+    /// Trusting an installed extension is not trusting every page that can name its commands.
+    func runExtensionLink(
+        named name: String, entryID: String, query: String?, _ body: @escaping @MainActor () -> Void
+    ) {
+        let key = DeepLinkConsentPolicy.key(extensionEntryID: entryID, query: query)
+        let summary = DeepLinkConsentPolicy.extensionParts(ofKey: key)?.summary
+        runAfterConsent(name: name, summary: summary, key: key, asks: true, source: .outside, body)
+    }
+
     private func runAfterConsent(
         name: String, input: DeepLinkInput, key: String, asks: Bool, source: DeepLinkSource,
+        _ body: @escaping @MainActor () -> Void
+    ) {
+        runAfterConsent(
+            name: name, summary: input.isEmpty ? nil : input.summary, key: key, asks: asks,
+            source: source, body)
+    }
+
+    /// One question at a time; a link arriving meanwhile is dropped, since nobody saw it.
+    private func runAfterConsent(
+        name: String, summary: String?, key: String, asks: Bool, source: DeepLinkSource,
         _ body: @escaping @MainActor () -> Void
     ) {
         guard asks, source == .outside, !settings.allowedDeepLinks.contains(key) else {
@@ -217,7 +239,7 @@ final class DeepLinkCoordinator {
         }
         isAskingConsent = true
         Task {
-            let choice = await askConsent(name: name, input: input)
+            let choice = await askConsent(name: name, summary: summary)
             isAskingConsent = false
             guard choice != .cancel else { return }
             if choice == .alwaysAllow, !settings.allowedDeepLinks.contains(key) {
@@ -228,15 +250,16 @@ final class DeepLinkCoordinator {
     }
 
     /// Cancel is the default: the panel takes key, and a stray Return must not run anything.
-    private func askConsent(name: String, input: DeepLinkInput) async -> ConsentChoice {
+    private func askConsent(name: String, summary: String?) async -> ConsentChoice {
         let message =
-            input.isEmpty
-            ? String(localized: "An app or web page asked Tinycast to run this. Allow only links you trust.")
-            : String(
-                localized: """
-                    An app or web page asked Tinycast to run this with “\(input.summary)”. \
-                    Allow only links you trust.
-                    """)
+            summary.map {
+                String(
+                    localized: """
+                        An app or web page asked Tinycast to run this with “\($0)”. \
+                        Allow only links you trust.
+                        """)
+            }
+            ?? String(localized: "An app or web page asked Tinycast to run this. Allow only links you trust.")
         let answer = await core.choose(
             title: String(localized: "Run “\(name)” from a link?"),
             message: message,

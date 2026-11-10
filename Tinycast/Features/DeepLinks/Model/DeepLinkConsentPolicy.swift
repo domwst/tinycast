@@ -15,6 +15,28 @@ enum DeepLinkConsentPolicy {
         return query.isEmpty ? row : row + "?" + query.joined(separator: "&")
     }
 
+    /// An extension link's whole query is its input, so a grant covers exactly what was asked.
+    static func key(extensionEntryID entryID: String, query: String?) -> String {
+        let row = entryID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? entryID
+        guard let query, !query.isEmpty else { return row }
+        return row + "?" + query
+    }
+
+    /// The extension row a remembered key names, with its query as a reader would check it.
+    static func extensionParts(ofKey key: String) -> (entryID: String, summary: String?)? {
+        let split = key.split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false)
+        guard let entryID = split.first.flatMap({ String($0).removingPercentEncoding }),
+            entryID.hasPrefix(extensionEntryPrefix)
+        else { return nil }
+        guard split.count == 2 else { return (entryID, nil) }
+        let query = String(split[1]).removingPercentEncoding ?? String(split[1])
+        let summary = query.count > summaryLength ? String(query.prefix(summaryLength)) + "…" : query
+        return (entryID, summary)
+    }
+
+    private static let extensionEntryPrefix = "extension:"
+    private static let summaryLength = 160
+
     /// The row and input a remembered key stands for; nil for one this build can't read.
     static func parts(ofKey key: String) -> (entryID: String, input: DeepLinkInput)? {
         let split = key.split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false)

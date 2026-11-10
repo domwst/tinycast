@@ -521,7 +521,7 @@ final class AppCore {
         }
         switch route {
         case .command(let link):
-            extensionCoordinator.runDeepLink(link)
+            extensionCoordinator.runDeepLink(link, query: url.query(percentEncoded: true))
         case .storeInstall(let install):
             extensionCoordinator.showStoreInstall(install)
         }

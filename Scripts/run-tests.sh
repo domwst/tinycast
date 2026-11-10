@@ -746,6 +746,16 @@ run backup-archive-test   Tinycast/Platform/AppPaths.swift \
                            Tinycast/Features/Backup/Service/BackupStaging.swift
 E=Tinycast/Features/Extensions
 run symbols-test           $E/Service/SymbolCatalog.swift
+run extension-secrets-migration-test \
+                           Tinycast/Migrations/ExtensionSecretsMigration.swift \
+                           $E/Service/ExtensionStorage.swift \
+                           $E/Service/ExtensionCatalog.swift \
+                           Tinycast/Platform/AppDisplayName.swift \
+                           $E/Model/ExtensionManifest.swift \
+                           $E/Model/ExtensionLaunchType.swift \
+                           $E/Model/ExtensionRefreshPolicy.swift \
+                           $E/Model/ExtensionRefreshState.swift \
+                           $E/Model/RenderNode.swift
 run ext-cleanup-test       $E/Service/ExtensionCleanup.swift \
                            $E/Service/ExtensionCatalog.swift \
                            Tinycast/Platform/AppDisplayName.swift \

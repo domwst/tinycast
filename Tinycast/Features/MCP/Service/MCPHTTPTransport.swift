@@ -13,6 +13,9 @@ final class MCPHTTPTransport: MCPTransport {
     private var protocolVersion = MCPProtocol.version
     private var nextID = 1
     private var isConnected = false
+    /// Closing is final, and cancels what is in flight, so a withdrawn server gets nothing more.
+    private var isClosed = false
+    private var inFlight: [UUID: URLSession] = [:]
 
     init(
         url: String, headerName: String, headerValue: String,
@@ -29,6 +32,7 @@ final class MCPHTTPTransport: MCPTransport {
     }
 
     func connect() async throws {
+        guard !isClosed else { throw MCPTransportError.notRunning }
         isConnected = true
     }
 
@@ -62,7 +66,10 @@ final class MCPHTTPTransport: MCPTransport {
 
     func close() {
         isConnected = false
+        isClosed = true
         sessionID = nil
+        inFlight.values.forEach { $0.invalidateAndCancel() }
+        inFlight.removeAll()
     }
 
     private func post(
@@ -77,13 +84,19 @@ final class MCPHTTPTransport: MCPTransport {
         request.setValue(protocolVersion, forHTTPHeaderField: "MCP-Protocol-Version")
         if let sessionID { request.setValue(sessionID, forHTTPHeaderField: "Mcp-Session-Id") }
         let token = try await authorization?(nil)
+        guard !isClosed else { throw MCPTransportError.notRunning }
         if let token {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         } else if !headerName.isEmpty, !headerValue.isEmpty {
             request.setValue(headerValue, forHTTPHeaderField: headerName)
         }
         let session = MCPOAuthHTTP.session(followsSameOrigin: true)
-        defer { session.invalidateAndCancel() }
+        let flight = UUID()
+        inFlight[flight] = session
+        defer {
+            inFlight[flight] = nil
+            session.invalidateAndCancel()
+        }
         do {
             let (data, response) = try await session.data(for: request)
             guard let response = response as? HTTPURLResponse else {
@@ -91,6 +104,7 @@ final class MCPHTTPTransport: MCPTransport {
             }
             if response.statusCode == 401, let authorization, let token {
                 let refreshed = try await authorization(token)
+                guard !isClosed else { throw MCPTransportError.notRunning }
                 request.setValue("Bearer \(refreshed)", forHTTPHeaderField: "Authorization")
                 let (retried, reply) = try await session.data(for: request)
                 guard let reply = reply as? HTTPURLResponse else { throw MCPTransportError.malformedResponse }

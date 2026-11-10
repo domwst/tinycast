@@ -807,14 +807,14 @@ private struct ExtensionPreferenceRow: View {
 
     private func load() {
         let value =
-            storage.preference(extension: extensionName, key: schema.name)
+            storage.preference(extension: extensionName, schema: schema)
             ?? schema.effectiveDefault
         text = value.stringValue
         flag = value.boolValue
     }
 
     private func save(_ value: String) {
-        storage.setPreference(extension: extensionName, key: schema.name, value: .string(value))
+        storage.setPreference(extension: extensionName, schema: schema, value: .string(value))
     }
 
     private func choosePath() {

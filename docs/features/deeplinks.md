@@ -47,7 +47,8 @@ Settings shortcut field; only the Settings window sets it.
   `com.raycast:` never reach a built-in.
 - **The built-in router never touches extension types.** `DeepLinkCoordinator.handles(_:)` leaves
   the `extensions` host and every Raycast scheme to the extension branch of
-  `AppCore.handleOpenURL`. Copy Deeplink asks `ExtensionCoordinator.deepLink(forEntryID:arguments:)`
+  `AppCore.handleOpenURL`, which still asks through `runExtensionLink`, keyed by the command's entry
+  ID and the link's whole query. Copy Deeplink asks `ExtensionCoordinator.deepLink(forEntryID:arguments:)`
   for an extension row, which builds it in the channel's scheme. Moving extensions out of the app
   means deleting that one branch.
 - **A link never runs shell text unasked.** Open in Browser, Run Shell Command and Quit have no link,

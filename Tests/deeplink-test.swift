@@ -358,6 +358,22 @@ struct DeepLinkTests {
         expect(
             DeepLinkConsentPolicy.parts(ofKey: "system-action:lock-screen")?.input == plain,
             "a plain key is the row alone")
+        let command = "extension:@scope/demo/search"
+        let query = "arguments=%7B%22q%22%3A%22x%22%7D&launchType=background"
+        let extensionKey = DeepLinkConsentPolicy.key(extensionEntryID: command, query: query)
+        expect(
+            extensionKey != DeepLinkConsentPolicy.key(extensionEntryID: command, query: nil)
+                && extensionKey
+                    != DeepLinkConsentPolicy.key(extensionEntryID: command, query: "launchType=background"),
+            "an extension grant covers only its exact query")
+        let extensionParts = DeepLinkConsentPolicy.extensionParts(ofKey: extensionKey)
+        expect(
+            extensionParts?.entryID == command
+                && extensionParts?.summary == #"arguments={"q":"x"}&launchType=background"#,
+            "an extension key reads back its row and the query a reader checks")
+        expect(
+            DeepLinkConsentPolicy.extensionParts(ofKey: "system-action:lock-screen") == nil,
+            "a built-in key is never read as an extension one")
     }
 
     static func consentChecks() {

@@ -17,6 +17,7 @@ struct MCPStdioTests {
         await aServerThatDiesMidCallFailsThatCall()
         await anUnsolicitedServerRequestIsDeclined()
         await stoppingLeavesNothingRunning()
+        await aWithdrawnServerNeverLaunches()
 
         print("\(passes) passed, \(failures) failed")
         if failures > 0 { exit(1) }
@@ -115,6 +116,33 @@ struct MCPStdioTests {
         manager.stop()
         expect(manager.tools.isEmpty, "stopping withdraws every tool")
         expect(manager.status(of: stub.server.id) == .stopped, "and forgets the connection")
+    }
+
+    /// Withdrawing consent must win over a start already queued or a lookup already running.
+    static func aWithdrawnServerNeverLaunches() async {
+        let marker = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appending(path: "mcp-withdrawn-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: marker) }
+        let closed = MCPStdioTransport(
+            command: "/usr/bin/touch", arguments: [marker.path], environment: [:])
+        closed.close()
+        do {
+            try await closed.connect()
+            expect(false, "a closed transport refuses to connect")
+        } catch {
+            expect(!FileManager.default.fileExists(atPath: marker.path), "a closed transport never launches")
+        }
+
+        let server = MCPServer(
+            name: "Touch", slug: "touch",
+            transport: .stdio(command: "/usr/bin/touch", arguments: [marker.path], environmentKeys: []))
+        let manager = MCPServerManager(secrets: MCPSecretStore(keychain: .init(scope: "mcp-test")))
+        manager.reconcile([server])
+        manager.stop()
+        try? await Task.sleep(for: .seconds(1))
+        expect(
+            !FileManager.default.fileExists(atPath: marker.path),
+            "a start still queued when the manager stopped never launches its server")
     }
 }
 

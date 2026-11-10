@@ -204,6 +204,11 @@ final class AppCore {
     }
 }
 
+/// The real one deletes decrypted export copies; this harness never makes one.
+enum ClipboardExports {
+    static func declineCopiesForTermination() {}
+}
+
 @MainActor
 final class ActivationPolicy {
     let hasOpenWindows = false

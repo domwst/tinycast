@@ -20,6 +20,9 @@ bottom with the model picker. ⌘J hands a Quick AI conversation to the window.
   every streaming reply and drops both transcripts, but touches neither the saved conversations in
   `ai-chats.sqlite3` nor a Keychain key. `aiEnabled` is excluded from settings backups like every
   other AI key, so an import can never arm a feature it cannot configure.
+- **A provider's credentials stay with its origin.** Generation and model discovery sessions use
+  `AIRedirectPolicy`, which follows a redirect only to the same scheme, host and port, so an
+  `x-api-key`, a custom header or a 307's chat body never reaches another host.
 - **Installed model discovery is per-provider.** Settings → AI → Providers keeps Codex, Claude, Grok,
   OpenCode and Cursor visible with an individual toggle for each, all off by default. Turning one off cancels
   its check, clears its catalog and releases its process; Apple Intelligence is the default route when

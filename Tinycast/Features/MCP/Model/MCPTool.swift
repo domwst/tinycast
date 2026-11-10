@@ -73,9 +73,10 @@ enum MCPToolOutput {
         guard blocks.isEmpty else {
             return (blocks.joined(separator: "\n"), isError)
         }
-        // A server may answer with structured content alone; the model reads it as JSON.
+        // Fragments allowed: a scalar raises an Objective-C exception that `try?` cannot catch.
         guard let structured = object["structuredContent"],
-            let data = try? JSONSerialization.data(withJSONObject: structured.jsonObject),
+            let data = try? JSONSerialization.data(
+                withJSONObject: structured.jsonObject, options: .fragmentsAllowed),
             let text = String(bytes: data, encoding: .utf8)
         else {
             return ("The tool returned no content.", isError)

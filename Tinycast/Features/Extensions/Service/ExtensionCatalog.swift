@@ -75,16 +75,11 @@ enum ExtensionCatalog {
 
     /// Per-extension `environment.supportPath` — an extension's own scratch directory.
     static func supportPath(for name: String) -> URL {
-        supportRoot().appendingPathComponent(safeName(name), isDirectory: true)
+        supportRoot().appendingPathComponent(ExtensionManifest.safeName(name), isDirectory: true)
     }
 
     static func supportRoot() -> URL {
         supportDirectory().appendingPathComponent("extension-support", isDirectory: true)
-    }
-
-    /// npm-style names flattened to one path segment; a second copy that drifts orphans every file.
-    static func safeName(_ name: String) -> String {
-        name.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: "@", with: "")
     }
 
     private static func supportDirectory() -> URL {
@@ -178,6 +173,7 @@ enum ExtensionCatalog {
         case noBuiltCommands(String)
         case wrongPlatform(String)
         case copyFailed(String)
+        case unexpectedName(String)
 
         var errorDescription: String? {
             switch self {
@@ -197,6 +193,8 @@ enum ExtensionCatalog {
                 return String(localized: "\(name) doesn't support macOS.")
             case .copyFailed(let reason):
                 return String(localized: "Couldn't install the extension: \(reason)")
+            case .unexpectedName(let title):
+                return String(localized: "The download isn't the extension the store listed as \(title).")
             }
         }
     }
@@ -204,10 +202,15 @@ enum ExtensionCatalog {
     /// Manifest, built commands, `assets/` and any bundled `node_modules` — never `.js.map`s.
     @discardableResult
     static func install(
-        from source: URL, in directory: URL = ExtensionCatalog.extensionsDirectory()
+        from source: URL, in directory: URL = ExtensionCatalog.extensionsDirectory(),
+        expecting listing: (name: String, title: String)? = nil
     ) throws -> InstalledExtension {
         guard let manifest = try? ExtensionManifest.load(directory: source) else {
             throw InstallError.notAnExtension(source)
+        }
+        // A store download replaces the install its name keys, so it must be the one asked for.
+        if let listing, manifest.name != listing.name {
+            throw InstallError.unexpectedName(listing.title)
         }
         guard manifest.supportsMacOS else { throw InstallError.wrongPlatform(manifest.title) }
 

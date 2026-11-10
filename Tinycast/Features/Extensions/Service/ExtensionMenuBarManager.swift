@@ -194,7 +194,7 @@ final class ExtensionMenuBarManager: ExtensionRuntimeDelegate {
         let session = Session(request: request, owner: owner, mode: command.mode, execution: execution)
         active = session
         if controllers[entryID]?.isOpen == true { session.enableInteraction() }
-        let support = supportDirectory.appendingPathComponent(ExtensionCatalog.safeName(owner.manifest.name))
+        let support = supportDirectory.appendingPathComponent(ExtensionManifest.safeName(owner.manifest.name))
         let context = ExtensionLaunchContext(
             extensionName: owner.manifest.name, extensionTitle: owner.title, commandName: command.name,
             commandMode: command.mode, assetsPath: owner.assetsPath, supportPath: support.path,
@@ -419,7 +419,7 @@ final class ExtensionMenuBarManager: ExtensionRuntimeDelegate {
     func runtime(_ runtime: ExtensionRuntime, log level: String, message: String) {
         if level == "error" {
             Logger(subsystem: "com.tinycast", category: "extension-menu-bar").error(
-                "\(message, privacy: .public)")
+                "\(message, privacy: .private)")
         }
     }
 }

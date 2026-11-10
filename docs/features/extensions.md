@@ -37,6 +37,15 @@ produces, rendered natively into the palette. No Electron, no browser, no Node.j
   the installed set and clears the launcher rows;
   `refresh()` returns early while it is off, so nothing is scanned and nothing is held. Enabling is also
   consent to run third-party code, so it confirms first and never rides a settings backup.
+- **A secret never reaches an extension's JSON file.** Password preferences and OAuth token sets go
+  through `ExtensionSecretVault`, one Keychain item per extension under the `extension-secrets` scope.
+  A password left in the file by an older build is never read as one.
+- **A name never leaves its folder.** `ExtensionManifest` drops a manifest whose name, flattened by
+  `safeName` or as installed, is empty, hidden or `..`, and any command named that way or with a
+  `/`. A store download must carry the manifest name of the listing it was fetched for.
+- **A link from outside asks before a command runs.** `ExtensionCoordinator.runDeepLink` goes
+  through `DeepLinkCoordinator.runExtensionLink`, and Always Allow remembers the command with its
+  exact query, so trusting an extension never trusts every page that can name its commands.
 - **`SymbolCatalog` reads a system bundle, not API.** The list comes from `CoreGlyphs.bundle` at
   runtime; every read stays optional and falls back to `SymbolCatalog.suggested`, and Apple's restricted
   marks are never offered.
@@ -623,7 +632,8 @@ or Reinstall action. Nothing installs or runs until asked. When extensions are d
 opens their Settings pane so they can be enabled through the usual consent flow.
 
 `raycast://extensions/<owner>/<extension>/<command>` runs an installed command from outside the app —
-a browser link, another app, a Shortcut — and `tinycast://` mirrors it so our own links never depend
+a browser link, another app, a Shortcut — after the same Always Allow, Run Once or Cancel question a
+built-in link with input asks. A grant covers that command with that exact query only. And `tinycast://` mirrors it so our own links never depend
 on Raycast winning the scheme. Both accept Raycast's query parameters: `arguments` as URL-encoded
 JSON, `fallbackText`, `context` (or `launchContext`) as a URL-encoded JSON object that arrives as
 `props.launchContext`, and `launchType=background`, which only a no-view command receives — a view
@@ -912,7 +922,8 @@ never shares with an installed copy.
 | What                                               | Where                                                 | Gone on uninstall |
 | -------------------------------------------------- | ----------------------------------------------------- | ----------------- |
 | The extension                                      | `extensions/<name>/`                                  | yes               |
-| `LocalStorage`, `Cache`, preferences, OAuth tokens | `extension-data/<safe name>.json`                     | yes               |
+| `LocalStorage`, `Cache`, preferences               | `extension-data/<safe name>.json`                     | yes               |
+| Password preferences, OAuth tokens                 | Keychain → `<bundle id>.extension-secrets`            | yes               |
 | Command subtitle, refresh state                    | `extension-commands.json`                             | yes               |
 | Installed store version                            | `extension-versions.json`                             | yes               |
 | `environment.supportPath`                          | `extension-support/<safe name>/`                      | yes               |
@@ -923,7 +934,7 @@ never shares with an installed copy.
 | User alias                                         | `UserDefaults` → `launcherAliases`                    | yes               |
 | Launch ranking                                     | `launcher-ranking.json`                               | yes               |
 
-`ExtensionCatalog.safeName` maps an npm-style name onto one path segment, and is the **only** copy of
+`ExtensionManifest.safeName` maps an npm-style name onto one path segment, and is the **only** copy of
 that mapping — a second one that drifts orphans every file the first one wrote.
 
 The last four rows are pruned by `ExtensionCoordinator.removeExtensionReferences`, reached through

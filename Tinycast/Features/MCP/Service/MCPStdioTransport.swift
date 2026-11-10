@@ -20,6 +20,8 @@ final class MCPStdioTransport: MCPTransport {
     private var stderrBuffer = Data()
     private var nextID = 1
     private var pending: [Int: PendingRequest] = [:]
+    /// Closing is final: a lookup still running when the server was withdrawn must not launch it.
+    private var isClosed = false
 
     /// An unterminated line this long means whatever is talking is not an MCP server.
     private static let outputLimit = 8 * 1_048_576
@@ -34,11 +36,13 @@ final class MCPStdioTransport: MCPTransport {
     var isRunning: Bool { process?.isRunning == true }
 
     func connect() async throws {
+        guard !isClosed else { throw MCPTransportError.notRunning }
         if isRunning { return }
         guard let executable = await ExecutableLocator.locate(command) else {
             throw MCPTransportError.launchFailed(
                 String(localized: "`\(command)` was not found on this Mac."))
         }
+        guard !isClosed else { throw MCPTransportError.notRunning }
         // A second caller may have started it during the lookup.
         if isRunning { return }
         let process = Process()
@@ -110,6 +114,7 @@ final class MCPStdioTransport: MCPTransport {
     }
 
     func close() {
+        isClosed = true
         stop(error: MCPTransportError.notRunning)
     }
 

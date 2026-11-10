@@ -1,5 +1,11 @@
 import Foundation
 
+/// Where an extension's passwords and OAuth tokens live, so its JSON file never holds one.
+struct ExtensionSecretVault: Sendable {
+    let values: @Sendable (_ extensionName: String) throws -> [String: String]
+    let save: @Sendable (_ values: [String: String], _ extensionName: String) throws -> Void
+}
+
 /// One JSON file per extension: small, read whole at launch and written rarely.
 @MainActor
 final class ExtensionStorage {
@@ -11,11 +17,9 @@ final class ExtensionStorage {
         var accessoryValues: [String: String] = [:]
         /// Each command's `storeValue` form fields, as the JSON the runtime wrote.
         var formValues: [String: [String: String]] = [:]
-        /// Each OAuth provider's token set, as the JSON the runtime wrote.
-        var oauthTokens: [String: String] = [:]
 
         enum CodingKeys: String, CodingKey {
-            case localStorage, caches, preferences, accessoryValues, formValues, oauthTokens
+            case localStorage, caches, preferences, accessoryValues, formValues
         }
 
         init() {}
@@ -34,8 +38,6 @@ final class ExtensionStorage {
                 try store.decodeIfPresent([String: String].self, forKey: .accessoryValues) ?? [:]
             formValues =
                 try store.decodeIfPresent([String: [String: String]].self, forKey: .formValues) ?? [:]
-            oauthTokens =
-                try store.decodeIfPresent([String: String].self, forKey: .oauthTokens) ?? [:]
         }
     }
 
@@ -81,13 +83,17 @@ final class ExtensionStorage {
     }
 
     private let directory: URL
+    private let vault: ExtensionSecretVault
     private var stores: [String: Store] = [:]
+    /// A failed read caches nothing, so a locked Keychain is asked again, not taken as empty.
+    private var secrets: [String: [String: String]] = [:]
     /// Writes are coalesced, so a busy `Cache` doesn't hit the disk per key.
     private var dirty: Set<String> = []
     private var flushTask: Task<Void, Never>?
 
-    init(directory: URL) {
+    init(directory: URL, vault: ExtensionSecretVault) {
         self.directory = directory
+        self.vault = vault
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     }
 
@@ -159,18 +165,45 @@ final class ExtensionStorage {
     // MARK: - OAuth tokens
 
     func oauthTokens(extension name: String, provider: String) -> String? {
-        store(for: name).oauthTokens[provider]
+        secretValues(name)?["oauth:" + provider]
     }
 
-    /// `nil` signs the provider out.
-    func setOAuthTokens(extension name: String, provider: String, tokens: String?) {
-        mutate(name) { $0.oauthTokens[provider] = tokens }
+    /// `nil` signs the provider out; false when the Keychain refused the write.
+    @discardableResult
+    func setOAuthTokens(extension name: String, provider: String, tokens: String?) -> Bool {
+        setSecret(tokens, for: "oauth:" + provider, extension: name)
     }
 
     // MARK: - Preferences
 
     func preference(extension name: String, key: String) -> ExtensionPreferenceValue? {
         store(for: name).preferences[key]?.preferenceValue
+    }
+
+    /// A password reads from the Keychain only; one left in the file by an older build is ignored.
+    func preference(
+        extension name: String, schema: ExtensionPreferenceSchema
+    ) -> ExtensionPreferenceValue? {
+        guard schema.kind == .password else { return preference(extension: name, key: schema.name) }
+        return secretValues(name)?["preference:" + schema.name].map(ExtensionPreferenceValue.string)
+    }
+
+    /// False when the Keychain refused a password, which then stays as it was.
+    @discardableResult
+    func setPreference(
+        extension name: String, schema: ExtensionPreferenceSchema, value: ExtensionPreferenceValue?
+    ) -> Bool {
+        guard schema.kind == .password else {
+            setPreference(extension: name, key: schema.name, value: value)
+            return true
+        }
+        guard setSecret(value?.stringValue, for: "preference:" + schema.name, extension: name) else {
+            return false
+        }
+        if store(for: name).preferences[schema.name] != nil {
+            setPreference(extension: name, key: schema.name, value: nil)
+        }
+        return true
     }
 
     func setPreference(extension name: String, key: String, value: ExtensionPreferenceValue?) {
@@ -189,7 +222,7 @@ final class ExtensionStorage {
     ) -> [String: ExtensionPreferenceValue] {
         var resolved: [String: ExtensionPreferenceValue] = [:]
         for schema in schemas {
-            resolved[schema.name] = schema.runtimeValue(preference(extension: name, key: schema.name))
+            resolved[schema.name] = schema.runtimeValue(preference(extension: name, schema: schema))
         }
         return resolved
     }
@@ -200,7 +233,7 @@ final class ExtensionStorage {
     ) -> [ExtensionPreferenceSchema] {
         schemas.filter { schema in
             guard schema.required else { return false }
-            let value = preference(extension: name, key: schema.name) ?? schema.effectiveDefault
+            let value = preference(extension: name, schema: schema) ?? schema.effectiveDefault
             if case .string(let text) = value { return text.isEmpty }
             return false
         }
@@ -208,7 +241,31 @@ final class ExtensionStorage {
 
     func removeAll(extension name: String) {
         stores.removeValue(forKey: name)
+        secrets.removeValue(forKey: name)
+        try? vault.save([:], name)
         try? FileManager.default.removeItem(at: fileURL(for: name))
+    }
+
+    /// Writes the file back from what this build keeps, dropping any section it no longer reads.
+    func rewrite(extension name: String) {
+        mutate(name) { _ in }
+    }
+
+    // MARK: - Secrets
+
+    private func secretValues(_ name: String) -> [String: String]? {
+        if let cached = secrets[name] { return cached }
+        guard let loaded = try? vault.values(name) else { return nil }
+        secrets[name] = loaded
+        return loaded
+    }
+
+    private func setSecret(_ value: String?, for key: String, extension name: String) -> Bool {
+        guard var current = secretValues(name) else { return false }
+        current[key] = value
+        guard (try? vault.save(current, name)) != nil else { return false }
+        secrets[name] = current
+        return true
     }
 
     // MARK: - Persistence
@@ -250,6 +307,6 @@ final class ExtensionStorage {
     }
 
     private func fileURL(for name: String) -> URL {
-        directory.appendingPathComponent("\(ExtensionCatalog.safeName(name)).json")
+        directory.appendingPathComponent("\(ExtensionManifest.safeName(name)).json")
     }
 }

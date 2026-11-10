@@ -92,7 +92,8 @@ final class ExtensionCoordinator {
     }
 
     /// A `raycast://extensions/…` link: the same command the launcher would run, by slug.
-    func runDeepLink(_ link: ExtensionDeepLink) {
+    /// Every link reaching here came from outside; `query` is what a consent grant remembers.
+    func runDeepLink(_ link: ExtensionDeepLink, query: String?) {
         guard settings.extensionsEnabled else {
             core.showMessage(
                 String(localized: "Extensions are disabled — enable them in Settings"), tone: .danger)
@@ -103,9 +104,19 @@ final class ExtensionCoordinator {
                 String(localized: "No installed extension provides '\(link.commandName)'"), tone: .danger)
             return
         }
-        run(
-            owner, command: command, arguments: link.arguments, fallbackText: link.fallbackText,
-            launchType: link.launchType, launchContext: link.launchContext)
+        let ref = ExtensionCommandRef(extensionName: owner.manifest.name, commandName: command.name)
+        core.deepLinkCoordinator.runExtensionLink(
+            named: command.title, entryID: ref.entryID, query: query
+        ) { [weak self] in
+            // The question was a wait; a switch-off or uninstall meanwhile must still win.
+            guard let self, settings.extensionsEnabled,
+                let (owner, command) = extensions.resolve(link),
+                owner.manifest.name == ref.extensionName
+            else { return }
+            run(
+                owner, command: command, arguments: link.arguments, fallbackText: link.fallbackText,
+                launchType: link.launchType, launchContext: link.launchContext)
+        }
     }
 
     // MARK: - Managing one extension from the launcher

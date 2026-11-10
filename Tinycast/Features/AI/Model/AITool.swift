@@ -52,4 +52,20 @@ struct AIToolSession: Sendable {
     let tools: [AITool]
     let maxCalls: Int?
     let invoke: @Sendable (AIToolCall) async -> AIToolResult
+
+    /// A call naming a tool this turn never offered is refused before it reaches any server.
+    init(
+        tools: [AITool], maxCalls: Int?,
+        invoke: @escaping @Sendable (AIToolCall) async -> AIToolResult
+    ) {
+        self.tools = tools
+        self.maxCalls = maxCalls
+        let offered = Set(tools.map(\.name))
+        self.invoke = { call in
+            guard offered.contains(call.name) else {
+                return .failure(call.id, "No tool named \(call.name) was offered in this chat.")
+            }
+            return await invoke(call)
+        }
+    }
 }

@@ -10,6 +10,8 @@ final class MCPServerManager {
     @ObservationIgnored private let oauth: MCPOAuthManager?
     @ObservationIgnored private let secrets: MCPSecretStore
     @ObservationIgnored private var idleTask: Task<Void, Never>?
+    /// Owned so a withdrawn server's start, still queued, is cancelled rather than run late.
+    @ObservationIgnored private var starts: [UUID: Task<Void, Never>] = [:]
 
     /// Servers outlive one summon but not an afternoon; a resident helper is the memory budget.
     private static let idleTimeout: Duration = .seconds(600)
@@ -31,6 +33,7 @@ final class MCPServerManager {
     func reconcile(_ servers: [MCPServer]) {
         let wanted = Dictionary(servers.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         for (id, connection) in connections where wanted[id] != connection.server {
+            starts.removeValue(forKey: id)?.cancel()
             connection.stop()
             connections[id] = nil
         }
@@ -39,11 +42,11 @@ final class MCPServerManager {
                 let connection = MCPServerConnection(
                     server: server, secrets: secrets.secrets(for: server.id), oauth: oauth)
                 connections[server.id] = connection
-                Task { await connection.start() }
+                start(connection)
                 continue
             }
             // Idle covers failed, so entering chat retries a server that lost its network once.
-            if existing.isIdle { Task { await existing.start() } }
+            if existing.isIdle { start(existing) }
         }
         armIdleTimer()
     }
@@ -53,14 +56,23 @@ final class MCPServerManager {
     }
 
     func disconnect(_ id: UUID) {
+        starts.removeValue(forKey: id)?.cancel()
         connections.removeValue(forKey: id)?.stop()
     }
 
     func stop() {
         idleTask?.cancel()
         idleTask = nil
+        starts.values.forEach { $0.cancel() }
+        starts = [:]
         for connection in connections.values { connection.stop() }
         connections = [:]
+    }
+
+    private func start(_ connection: MCPServerConnection) {
+        let id = connection.server.id
+        starts[id]?.cancel()
+        starts[id] = Task { await connection.start() }
     }
 
     /// Restarted on every use, so the countdown measures idleness rather than uptime.
