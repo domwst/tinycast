@@ -23,8 +23,10 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
   -addext "keyUsage=critical,digitalSignature" \
   -addext "extendedKeyUsage=critical,codeSigning"
 
-# Bundle it as a .p12 (the non-empty password keeps `security import` happy).
+# Bundle it as a .p12 (the non-empty password keeps `security import` happy). The algorithms
+# are spelled out: OpenSSL 3's AES/SHA-256 default fails `security import` as a "wrong password".
 openssl pkcs12 -export -inkey /tmp/tc-key.pem -in /tmp/tc-cert.pem \
+  -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg sha1 \
   -name "Tinycast Self-Signed" -out /tmp/tc.p12 -passout pass:tinycast
 
 # Import into the login keychain. Only codesign may use the key; never `-A`, which lets any app.
