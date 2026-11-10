@@ -51,6 +51,55 @@ Removing that line would reintroduce exactly those three problems. See
 There is no CI workflow and no automated reviewer, so the whole bar in
 [testing.md](testing.md#definition-of-done) is run locally before a PR is opened.
 
+## Installing with Nix
+
+This fork ships no notarized build. Its flake builds `Tinycast.app` from source with the Xcode
+already on the Mac and exports three things: `packages.<system>.tinycast`, `overlays.default`, which
+adds `pkgs.tinycast`, and `darwinModules.default`, which installs it. In a nix-darwin flake:
+
+```nix
+inputs.tinycast.url = "github:domwst/tinycast/clipboard-security";
+inputs.tinycast.inputs.nixpkgs.follows = "nixpkgs";
+
+# in the darwinSystem modules
+inputs.tinycast.darwinModules.default
+{
+  nixpkgs.overlays = [ inputs.tinycast.overlays.default ];
+  programs.tinycast.enable = true;
+}
+```
+
+Update with `nix flake update tinycast` and `darwin-rebuild switch`. A Nix build sets
+`TINYCAST_PACKAGED_BY=nix`, so it never checks for or installs updates itself.
+
+**What the build needs.** Xcode at `/Applications/Xcode.app`, with its license accepted, or
+`pkgs.tinycast.override { xcode = "/path/to/Xcode.app"; }`. The Nix sandbox must be off, the macOS
+default, or `relaxed`, since the derivation reaches Xcode outside the store (`__noChroot`). It builds
+only the host's architecture and passes `-disable-sandbox` to Swift, because the macro plugin server
+can't start its own sandbox as a Nix build user.
+
+**Signing.** No key belongs in the store, so the package is ad-hoc signed. macOS ties permission
+grants and Keychain access to a signature's designated requirement, and an ad-hoc one is the build's
+hash, so every update asks for Accessibility, Input Monitoring and Full Disk Access again, and for
+access to Tinycast's Keychain items. To keep them across updates, set `programs.tinycast.signing`:
+
+```nix
+programs.tinycast.signing = {
+  identity = "Tinycast Self-Signed";
+  keychain = "/Users/<you>/Library/Keychains/tinycast-signing.keychain-db";
+};
+```
+
+The module then skips `/Applications/Nix Apps`. On activation, when the build changed,
+`nix/install-signed.sh` copies the app to `/Applications/Tinycast.app` and re-signs it, helpers
+first, as `system.primaryUser`. It unlocks the keychain, asking for its password, and leaves the old
+copy in place if anything fails. Create that keychain as [signing.md](signing.md#a-dedicated-keychain-for-nix-installs)
+shows.
+
+**The trade-off.** Anything that can use the signing key can sign an impostor that macOS treats as
+Tinycast, with its permissions and its Keychain items, the clipboard key among them. Ad-hoc signing
+leaves no such key. A dedicated keychain that locks itself narrows that to the minutes after an update.
+
 ## Releasing
 
 `.github/workflows/release.yml` builds and publishes a DMG from GitHub Actions, no local machine

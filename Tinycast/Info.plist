@@ -79,6 +79,8 @@
 	<string>Tinycast uses Bluetooth access only when you run the Toggle Bluetooth action.</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>Tinycast</string>
+	<key>TinycastPackagedBy</key>
+	<string>$(TINYCAST_PACKAGED_BY)</string>
 	<key>TinycastUpdatePublicKey</key>
 	<string>CSzrQKht5GxZW2nVLbWEunvUChqDkeFLP64xSQRWN9E=</string>
 </dict>

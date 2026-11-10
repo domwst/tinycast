@@ -6,8 +6,15 @@ enum ReleaseChannel: Sendable {
     case beta
     /// A local build. It has no release stream, and never updates itself.
     case development
+    /// Installed by a package manager, which owns its updates, so it never replaces itself.
+    case packaged
 
-    init(bundleID: String?) {
+    /// `packagedBy` is the `TinycastPackagedBy` value a package build sets, such as `nix`.
+    init(bundleID: String?, packagedBy: String? = nil) {
+        if let packagedBy, !packagedBy.isEmpty, bundleID != nil {
+            self = .packaged
+            return
+        }
         switch bundleID {
         case "com.tinycast.app": self = .stable
         case "com.tinycast.app.beta": self = .beta
@@ -15,14 +22,14 @@ enum ReleaseChannel: Sendable {
         }
     }
 
-    var updatesItself: Bool { self != .development }
+    var updatesItself: Bool { self == .stable || self == .beta }
 
     /// Beta ships as a GitHub prerelease and stable does not; neither ever sees the other's.
     func accepts(prerelease: Bool) -> Bool {
         switch self {
         case .stable: return !prerelease
         case .beta: return prerelease
-        case .development: return false
+        case .development, .packaged: return false
         }
     }
 }

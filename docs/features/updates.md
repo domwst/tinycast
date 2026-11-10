@@ -35,6 +35,10 @@ uninstall` and `brew list` keep working unchanged.
   advance is never used, and nothing beside the bundle is ever chosen instead of it.
 - **Downloads are bounded.** The zip stops at the release's own size, or 1 GiB when the feed gives
   none, and the `.sig` at 64 KiB.
+- **A packaged build never updates itself.** `TINYCAST_PACKAGED_BY` (empty by default) lands in
+  `Info.plist` as `TinycastPackagedBy`, and any value makes `ReleaseChannel` `.packaged`: no checks,
+  no Check for Updates command, no install. `nix/package.nix` sets it to `nix`, since Nix owns the
+  store copy and the next build replaces it.
 - **This fork updates from its own releases.** `ReleaseFeed.repository` is `domwst/tinycast`, so an
   upstream build is never offered: it would store clipboard history in plaintext again.
 - **A build only ever updates within its own channel.** The channels are separate bundle ids installed

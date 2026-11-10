@@ -47,6 +47,7 @@ system-wide chord, and HIToolbox's TIS APIs remain the public input-source mecha
 | `Tinycast/Migrations/`   | one-shot repairs of state an older release left behind, each deleted after one release  |
 | `Tests/`                 | the standalone harnesses — one Swift file each, no XCTest target                        |
 | `Scripts/`               | every executable script: test runner, data generators, packaging, linting, editor setup |
+| `nix/`                   | the flake's package, overlay and nix-darwin module, built with the host's Xcode          |
 
 | Read it before you                                          | Doc                                                          |
 | ----------------------------------------------------------- | ------------------------------------------------------------ |

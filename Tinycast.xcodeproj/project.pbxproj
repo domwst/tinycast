@@ -5264,6 +5264,7 @@
 				SWIFT_STRICT_CONCURRENCY = complete;
 				SWIFT_VERSION = 6.0;
 				TINYCAST_BUNDLE_IDENTIFIER = com.tinycast.app.dev;
+				TINYCAST_PACKAGED_BY = "";
 				TINYCAST_URL_SCHEME = "tinycast-dev";
 			};
 			name = Debug;
@@ -5384,6 +5385,7 @@
 				SWIFT_STRICT_CONCURRENCY = complete;
 				SWIFT_VERSION = 6.0;
 				TINYCAST_BUNDLE_IDENTIFIER = com.tinycast.app;
+				TINYCAST_PACKAGED_BY = "";
 				TINYCAST_URL_SCHEME = tinycast;
 			};
 			name = Release;

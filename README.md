@@ -38,6 +38,12 @@ For anything private, feel free to email [iabueammar@gmail.com](mailto:iabueamma
 
 ## Install
 
+**This fork** (encrypted clipboard history and the security fixes upstream declined) has no
+notarized release. Build it from source with Nix and nix-darwin, as
+[docs/release.md](docs/release.md#installing-with-nix) describes. The Homebrew casks and DMGs below
+install upstream Tinycast, which stores clipboard history in plaintext and would discard this
+fork's encrypted history.
+
 On an Apple silicon Mac with macOS 26 or newer:
 
 ```sh

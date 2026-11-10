@@ -27,9 +27,9 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
 openssl pkcs12 -export -inkey /tmp/tc-key.pem -in /tmp/tc-cert.pem \
   -name "Tinycast Self-Signed" -out /tmp/tc.p12 -passout pass:tinycast
 
-# Import into the login keychain so codesign can use it without prompting.
+# Import into the login keychain. Only codesign may use the key; never `-A`, which lets any app.
 security import /tmp/tc.p12 -k ~/Library/Keychains/login.keychain-db \
-  -P tinycast -A -T /usr/bin/codesign
+  -P tinycast -T /usr/bin/codesign
 
 rm -f /tmp/tc-key.pem /tmp/tc-cert.pem /tmp/tc.p12
 ```
@@ -41,6 +41,30 @@ security find-identity -p codesigning | grep "Tinycast Self-Signed"
 ```
 
 Now local builds (Xcode, VS Code F5, `xcodebuild`) sign with it, and you grant Accessibility once.
+The first signing asks to let codesign use the key; choose Always Allow.
+
+Any process running as you can run `codesign` too, and so sign an app that macOS takes for Tinycast,
+with its permissions. That is the price of a self-signed identity; a Developer ID team is the fix.
+
+### A dedicated keychain for Nix installs
+
+For `programs.tinycast.signing` ([release.md](release.md#installing-with-nix)), keep the identity
+in a keychain of its own that locks itself, so the key is usable only for a few minutes after an
+update unlocks it:
+
+```sh
+KC=~/Library/Keychains/tinycast-signing.keychain-db
+security create-keychain "$KC"                  # asks for a new password
+security set-keychain-settings -l -u -t 300 "$KC"  # lock on sleep and after five minutes
+
+# Generate the certificate and .p12 exactly as above, then import into this keychain only.
+security import /tmp/tc.p12 -k "$KC" -P tinycast -T /usr/bin/codesign
+rm -f /tmp/tc-key.pem /tmp/tc-cert.pem /tmp/tc.p12
+
+security find-identity -p codesigning "$KC"     # lists "Tinycast Self-Signed"
+```
+
+It stays off the keychain search list, so nothing finds it unless asked for it by path.
 
 ## 2. The release secrets
 

@@ -108,6 +108,13 @@ struct UpdatesTests {
         expect(beta == .beta, "the beta bundle id is the beta channel")
         expect(dev == .development, "the dev bundle id is a local build")
         expect(ReleaseChannel(bundleID: nil) == .development, "a missing bundle id never updates")
+        let packaged = ReleaseChannel(bundleID: "com.tinycast.app", packagedBy: "nix")
+        expect(
+            packaged == .packaged && !packaged.updatesItself,
+            "a package manager's build leaves its updates to that package manager")
+        expect(
+            ReleaseChannel(bundleID: "com.tinycast.app", packagedBy: "") == .stable,
+            "an empty marker, as every other build carries, changes nothing")
 
         expect(stable.updatesItself && beta.updatesItself, "both shipped channels update")
         expect(!dev.updatesItself, "a local build does not update itself")

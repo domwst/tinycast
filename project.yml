@@ -19,6 +19,8 @@ settings:
     SWIFT_STRICT_CONCURRENCY: complete
     TINYCAST_BUNDLE_IDENTIFIER: com.tinycast.app
     TINYCAST_URL_SCHEME: tinycast
+    # Set by a package build, such as nix/package.nix, so the app leaves updates to it.
+    TINYCAST_PACKAGED_BY: ""
   configs:
     Debug:
       TINYCAST_BUNDLE_IDENTIFIER: com.tinycast.app.dev
