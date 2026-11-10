@@ -10,25 +10,34 @@ if [ -n "$keychain" ] && [[ "$keychain" != /* ]]; then
   home="$(/usr/bin/dscl . -read "/Users/$user" NFSHomeDirectory | /usr/bin/sed 's/^NFSHomeDirectory: //')"
   keychain="$home/$keychain"
 fi
-stamp="$dest/../.tinycast-installed-from"
-
-# Unchanged since the last install: leave the signed copy, and every grant on it, alone.
-if [ -d "$dest" ] && [ "$(cat "$stamp" 2>/dev/null)" = "$src" ]; then
-  exit 0
-fi
 
 # Activation runs as root; the identity lives in the user's keychain, so signing runs as them.
 as_user=()
+# Root keeps its stamp and staging out of /Applications, which anyone in admin can write into.
+work="$(dirname "$dest")"
 if [ "$(id -u)" = 0 ]; then
   as_user=(/bin/launchctl asuser "$(id -u "$user")" /usr/bin/sudo -u "$user" --)
+  work=/var/db/tinycast-nix
+  mkdir -p "$work"
+  chown root:wheel "$work"
+  chmod 0755 "$work"
+  rm -f "$(dirname "$dest")/.tinycast-installed-from"
+fi
+stamp="$work/.tinycast-installed-from"
+
+# Unchanged since the last install: leave the signed copy, and every grant on it, alone.
+if [ -d "$dest" ] && [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$src" ]; then
+  exit 0
 fi
 
-staging="$(mktemp -d "$(dirname "$dest")/.tinycast-install.XXXXXX")"
+staging="$(mktemp -d "$work/.tinycast-install.XXXXXX")"
 trap 'rm -rf "$staging"' EXIT
+# Readable so the user can sign inside it, never writable, so nothing in it can be swapped.
+chmod 0755 "$staging"
 /usr/bin/ditto "$src" "$staging/Tinycast.app"
-chmod -R u+w "$staging"
+chmod -R u+w "$staging/Tinycast.app"
 if [ "$(id -u)" = 0 ]; then
-  chown -R "$user":staff "$staging"
+  chown -R "$user":staff "$staging/Tinycast.app"
 fi
 
 keychain_args=()
@@ -50,8 +59,12 @@ done
 sign "$staging/Tinycast.app"
 "${as_user[@]}" /usr/bin/codesign --verify --strict --deep "$staging/Tinycast.app"
 
-if [ -e "$dest" ]; then
-  mv "$dest" "$staging/previous.app"
+# `-h` renames over a symlink planted at either path instead of moving into what it points at.
+if [ -e "$dest" ] || [ -L "$dest" ]; then
+  mv -h "$dest" "$staging/previous.app"
 fi
-mv "$staging/Tinycast.app" "$dest"
+if ! mv -h "$staging/Tinycast.app" "$dest"; then
+  if [ -e "$staging/previous.app" ]; then mv -h "$staging/previous.app" "$dest" || true; fi
+  exit 1
+fi
 printf '%s' "$src" > "$stamp"

@@ -94,7 +94,8 @@ user's own keychains instead.
 
 The module then skips `/Applications/Nix Apps`. On activation, when the build changed,
 `nix/install-signed.sh` copies the app to `/Applications/Tinycast.app` and re-signs it, helpers
-first, as `system.primaryUser`. It unlocks the keychain, asking for its password, and leaves the old
+first, as `system.primaryUser`. As root it stages and stamps only under `/var/db/tinycast-nix`,
+since anyone in `admin` can plant a symlink in `/Applications` for a root write to follow. It unlocks the keychain, asking for its password, and leaves the old
 copy in place if anything fails. Create that keychain as [signing.md](signing.md#a-dedicated-keychain-for-nix-installs)
 shows.
 

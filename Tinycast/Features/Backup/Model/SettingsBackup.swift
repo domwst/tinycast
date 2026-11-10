@@ -266,12 +266,12 @@ extension SettingsBackup {
         return backup
     }
 
-    @discardableResult
     /// The existing list, then whatever the file adds; nothing the reader excluded is dropped.
     static func merged(_ existing: [String], _ incoming: [String]) -> [String] {
         existing + incoming.filter { !existing.contains($0) }
     }
 
+    @discardableResult
     func apply(to core: AppCore) -> ApplySummary {
         var summary = ApplySummary()
         if let s = settings { summary.settingsFields = applySettings(s, to: core) }
@@ -548,7 +548,8 @@ extension SettingsBackup {
             settings.quicklinkOpensNewWindow = flag
             count += 1
         }
-        if let flag = s.quicklinkPassesSelectedText {
+        // On, it copies the selection and sends it to a site, so an import may only turn it off.
+        if let flag = s.quicklinkPassesSelectedText, !flag || settings.quicklinkPassesSelectedText {
             settings.quicklinkPassesSelectedText = flag
             count += 1
         }

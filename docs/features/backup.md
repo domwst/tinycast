@@ -22,7 +22,8 @@ A backup carries five independently selectable categories, ticked on export and 
   case: its order and checkboxes live on their own `UserDefaults` keys precisely so an import cannot
   arm **Run Shell Command** in someone's launcher. This change adds *content*, never a capability.
 - **A carried guard only moves the safe way.** An import may turn `clipboardEnabled` off but never
-  on, since on records every copy, may stop `automaticallyCheckForUpdates` but never start it, and may raise `autoJoinConfirms` or `autoJoinNamedProvidersOnly`
+  on, since on records every copy, may stop `automaticallyCheckForUpdates` but never start it, may
+  turn `quicklinkPassesSelectedText` off but never on, since on sends the selection to a site, and may raise `autoJoinConfirms` or `autoJoinNamedProvidersOnly`
   but never lower either, since lowering arms unattended joins.
 - **No absolute path may enter a `.tinycast`.** A clip's `imagePath` names a file on the Mac that wrote
   it, so `BackupClipboardItem` carries a bundle-relative `imageName` instead. `backup-archive-test`
