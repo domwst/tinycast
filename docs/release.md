@@ -84,11 +84,13 @@ hash, so every update asks for Accessibility, Input Monitoring and Full Disk Acc
 access to Tinycast's Keychain items. To keep them across updates, set `programs.tinycast.signing`:
 
 ```nix
-programs.tinycast.signing = {
-  identity = "Tinycast Self-Signed";
-  keychain = "/Users/<you>/Library/Keychains/tinycast-signing.keychain-db";
-};
+# "Tinycast Self-Signed" from ~/Library/Keychains/tinycast-signing.keychain-db, by default
+programs.tinycast.signing = { };
 ```
+
+`identity` and `keychain` override either default. A `keychain` starting with `~/` resolves to
+`system.primaryUser`'s home at activation, so the config names no user, and `null` searches the
+user's own keychains instead.
 
 The module then skips `/Applications/Nix Apps`. On activation, when the build changed,
 `nix/install-signed.sh` copies the app to `/Applications/Tinycast.app` and re-signs it, helpers

@@ -26,16 +26,16 @@ in
           options = {
             identity = lib.mkOption {
               type = lib.types.str;
-              example = "Tinycast Self-Signed";
+              default = "Tinycast Self-Signed";
               description = "Code-signing identity to re-sign the installed app with.";
             };
             keychain = lib.mkOption {
               type = lib.types.nullOr lib.types.str;
-              default = null;
-              example = "/Users/me/Library/Keychains/tinycast-signing.keychain-db";
+              default = "~/Library/Keychains/tinycast-signing.keychain-db";
               description = ''
-                Keychain holding the identity. A dedicated one that locks itself keeps other
-                processes from signing an impostor between updates; it is unlocked on install.
+                Keychain holding the identity; a leading `~/` is `system.primaryUser`'s home. A
+                dedicated one that locks itself keeps other processes from signing an impostor
+                between updates, and it is unlocked on install. Null searches the user's keychains.
               '';
             };
           };
@@ -61,7 +61,7 @@ in
         ${lib.escapeShellArg config.system.primaryUser} \
         ${lib.escapeShellArg cfg.signing.identity} \
         ${lib.escapeShellArg (if cfg.signing.keychain == null then "" else cfg.signing.keychain)} \
-        || echo "warning: Tinycast was not updated; the previous copy stays in place" >&2
+        || echo "warning: Tinycast was not installed or updated; see docs/signing.md in its repo" >&2
     '';
   };
 }
