@@ -229,6 +229,18 @@ struct ExtensionSearchAccessoryTests {
             "and a locked read was not cached as empty",
             locked.preference(extension: "sample", schema: password) == .string(marker))
 
+        storage.setFormValues(
+            extension: "sample", command: "login", values: ["user": "me", "password": marker],
+            secure: ["password"])
+        storage.flush()
+        let withForm = (try? String(
+            contentsOf: directory.appendingPathComponent("sample.json"), encoding: .utf8)) ?? ""
+        check("a remembered password field never reaches the file", !withForm.contains(marker))
+        check(
+            "and reads back with the rest of its form",
+            ExtensionStorage(directory: directory, vault: backing.vault)
+                .formValues(extension: "sample", command: "login") == ["user": "me", "password": marker])
+
         reloaded.removeAll(extension: "sample")
         check("uninstalling drops the vault item", backing.items["sample"] == nil)
     }

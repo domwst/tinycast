@@ -25,6 +25,8 @@ final class ExtensionMenuBarHost: ExtensionHostContext {
     var activeExtensionName: String? { owner.manifest.name }
     var activeLaunchType: ExtensionLaunchType { isInteractive ? .userInitiated : .background }
     var pasteTarget: NSRunningApplication? { NSWorkspace.shared.frontmostApplication }
+    /// A menu has no form, so nothing it stores is a password field.
+    var secureFormFieldIDs: Set<String> { [] }
     var applicationURLs: [URL] { coordinator?.applicationURLs ?? [] }
 
     func enableInteraction() { isInteractive = true }

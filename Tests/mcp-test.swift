@@ -163,6 +163,13 @@ struct MCPTests {
         expect(structured.content.contains("count"), "structured-only output is read as JSON")
         let scalar = MCPToolOutput.flatten(JSONValue(["structuredContent": "x"]))
         expect(scalar.content == "\"x\"", "a scalar a hostile server sends is read, not a crash")
+        if let infinite = JSONValue(data: Data(#"{"structuredContent":[-1e400]}"#.utf8)) {
+            expect(
+                MCPToolOutput.flatten(infinite).content == "[null]",
+                "a number too large for a Double is read as null, not a crash")
+        } else {
+            expect(false, "an overflowing number still parses")
+        }
         expect(
             MCPToolOutput.flatten(JSONValue([:])).content.isEmpty == false,
             "an empty answer still says something rather than nothing")

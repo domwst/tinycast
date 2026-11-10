@@ -209,10 +209,17 @@ final class DeepLinkCoordinator {
 
     /// Trusting an installed extension is not trusting every page that can name its commands.
     func runExtensionLink(
-        named name: String, entryID: String, query: String?, _ body: @escaping @MainActor () -> Void
+        named name: String, entryID: String, query: String?, input: String?,
+        _ body: @escaping @MainActor () -> Void
     ) {
+        let summary = input.map(DeepLinkConsentPolicy.displayable)
+        guard (summary?.count ?? 0) <= DeepLinkConsentPolicy.longestAskableInput else {
+            core.showMessage(
+                String(localized: "This link carries more input than Tinycast can show, so it didn’t run."),
+                tone: .danger)
+            return
+        }
         let key = DeepLinkConsentPolicy.key(extensionEntryID: entryID, query: query)
-        let summary = DeepLinkConsentPolicy.extensionParts(ofKey: key)?.summary
         runAfterConsent(name: name, summary: summary, key: key, asks: true, source: .outside, body)
     }
 
@@ -221,7 +228,8 @@ final class DeepLinkCoordinator {
         _ body: @escaping @MainActor () -> Void
     ) {
         runAfterConsent(
-            name: name, summary: input.isEmpty ? nil : input.summary, key: key, asks: asks,
+            name: name, summary: input.isEmpty ? nil : DeepLinkConsentPolicy.displayable(input.summary),
+            key: key, asks: asks,
             source: source, body)
     }
 

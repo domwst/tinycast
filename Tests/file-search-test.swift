@@ -191,14 +191,23 @@ struct FileSearchTests {
                 shipped.excludes(name: URL(filePath: path).lastPathComponent, path: path),
                 "\(path) is skipped")
         }
-        for path in ["/Users/test/Library/Messages", "/Users/test/Library/Safari"] {
+        // No patterns at all, as if every default were removed: the protected list still applies.
+        let protected = FileSearchPolicy(scopes: ["~"], ignorePatterns: [], homeDirectory: home)
+        for path in ["/Users/test/Library/Messages", "/Users/test/Library/Safari", "/System/Volumes/Data"] {
             expect(
-                shipped.excludes(name: URL(filePath: path).lastPathComponent, path: path),
+                protected.ignore.excludes(name: URL(filePath: path).lastPathComponent, path: path),
                 "\(path) is skipped, so the index never lists what Full Disk Access guards")
         }
         expect(
-            !shipped.excludes(name: "Messages", path: "/Users/test/Documents/Messages"),
+            !protected.ignore.excludes(name: "Messages", path: "/Users/test/Documents/Messages"),
             "a folder sharing a protected name elsewhere is indexed")
+        expect(
+            protected.ignoresRoot(home.path + "/Library/Messages/Attachments"),
+            "a scope inside a protected folder is not crawled either")
+        expect(
+            protected.ignoresRoot("/System/Volumes/Data/Users/test/Library/Messages"),
+            "nor one reached through the data volume's own mount")
+        expect(!protected.ignoresRoot(home.path + "/Documents"), "an ordinary scope still is")
         expect(
             !shipped.excludes(name: "Caches", path: "/Users/test/Developer/Caches"),
             "a caches folder elsewhere is indexed")

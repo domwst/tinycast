@@ -140,12 +140,18 @@ struct AIUsage: Equatable, Sendable {
 
     var totalTokens: Int? {
         guard let inputTokens, let outputTokens else { return nil }
-        return inputTokens + outputTokens
+        return Self.sum(inputTokens, outputTokens)
     }
 
     /// What the conversation now occupies in the window: every prompt token plus the reply.
     var contextTokens: Int? {
-        totalTokens.map { $0 + (cachedInputTokens ?? 0) }
+        totalTokens.map { Self.sum($0, cachedInputTokens ?? 0) }
+    }
+
+    /// Counts come from the provider, and a plain `+` on one it inflated would trap the whole app.
+    static func sum(_ first: Int, _ second: Int) -> Int {
+        let (total, overflowed) = first.addingReportingOverflow(second)
+        return overflowed ? (second < 0 ? .min : .max) : total
     }
 }
 

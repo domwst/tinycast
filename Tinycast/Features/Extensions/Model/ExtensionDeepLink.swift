@@ -20,6 +20,8 @@ struct ExtensionDeepLink: Sendable, Equatable {
     let fallbackText: String?
     let launchType: ExtensionLaunchType
     let launchContext: [String: RenderValue]
+    /// The context exactly as the link spelled it, which is what a consent question shows.
+    var launchContextText: String?
 
     /// `owner/ext` first so a scoped manifest wins over a bare slug collision.
     var extensionCandidates: [String] {
@@ -102,10 +104,14 @@ struct ExtensionDeepLink: Sendable, Equatable {
             commandName = body[body.count - 1]
         }
         guard !extensionName.isEmpty, !commandName.isEmpty else { return nil }
+        // A repeated input would show one value in the consent question and run with another.
+        let inputs = items.compactMap { inputName($0.name) }
+        guard Set(inputs).count == inputs.count else { return nil }
         var arguments: [String: String] = [:]
         var fallbackText: String?
         var launchType = ExtensionLaunchType.userInitiated
         var launchContext: [String: RenderValue] = [:]
+        var launchContextText: String?
         for item in items {
             switch item.name.lowercased() {
             case "arguments":
@@ -115,7 +121,10 @@ struct ExtensionDeepLink: Sendable, Equatable {
             case "launchtype", "launch_type":
                 launchType = item.value?.lowercased() == "background" ? .background : .userInitiated
             case "context", "launchcontext":
-                if let raw = item.value { launchContext = parseContext(raw) }
+                if let raw = item.value {
+                    launchContext = parseContext(raw)
+                    launchContextText = launchContext.isEmpty ? nil : raw
+                }
             default:
                 break
             }
@@ -124,7 +133,32 @@ struct ExtensionDeepLink: Sendable, Equatable {
             ExtensionDeepLink(
                 ownerOrAuthor: ownerOrAuthor, extensionName: extensionName, commandName: commandName,
                 arguments: arguments, fallbackText: fallbackText, launchType: launchType,
-                launchContext: launchContext))
+                launchContext: launchContext, launchContextText: launchContextText))
+    }
+
+    private static func inputName(_ name: String) -> String? {
+        switch name.lowercased() {
+        case "arguments": "arguments"
+        case "fallbacktext": "fallbacktext"
+        case "launchtype", "launch_type": "launchtype"
+        case "context", "launchcontext": "context"
+        default: nil
+        }
+    }
+
+    /// Everything the command would receive, labelled, from what was parsed rather than typed.
+    var inputSummary: String? {
+        var parts: [String] = []
+        if !arguments.isEmpty {
+            let pairs = arguments.sorted { $0.key < $1.key }.map { "\($0.key) = \($0.value)" }
+            parts.append(String(localized: "Arguments: \(pairs.joined(separator: ", "))"))
+        }
+        if let fallbackText, !fallbackText.isEmpty {
+            parts.append(String(localized: "Text: \(fallbackText)"))
+        }
+        if let launchContextText { parts.append(String(localized: "Context: \(launchContextText)")) }
+        if launchType == .background { parts.append(String(localized: "Runs in the background")) }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     nonisolated static func parseContext(_ raw: String) -> [String: RenderValue] {

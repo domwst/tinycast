@@ -136,10 +136,14 @@ key as a second check ([features/updates.md](features/updates.md)):
   `UPDATE_SIGNING_KEY`, and refuses unless the built app's `TinycastUpdatePublicKey` is its public
   half. A signature the feed lists must verify.
 
-**A new team strands the updater.** Installed copies require their own designated requirement, so
-a release under a new Apple team must be installed by hand once. `Scripts/check-update-path.sh`
-still downloads the last release on the channel before notarizing; for this fork, only its
-designated-requirement branch keeps that release able to update.
+**A new team strands the updater, and so does a new key.** Installed copies require both their
+own designated requirement and a zip signed by the key they ship, so a release that changes either
+must be installed by hand once. `Scripts/check-update-path.sh` downloads the last release on the
+channel before notarizing and fails unless both still hold.
+
+**Before this fork's first release**, replace upstream's `TinycastUpdatePublicKey` in `Info.plist`
+and the `SIGNING_IDENTITY` in `release.yml` with the fork's own key and Developer ID. Copies built
+with upstream's key refuse every zip the fork signs, and that is the intended failure.
 
 ## Developer ID stays in CI
 

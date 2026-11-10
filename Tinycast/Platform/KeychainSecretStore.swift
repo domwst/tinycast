@@ -44,8 +44,15 @@ struct KeychainSecretStore: Sendable {
     /// Replaced, never updated: an update keeps the access list of whoever made the item first.
     func setSecret(_ secret: String, for account: UUID) throws {
         guard secret.data(using: .utf8) != nil else { throw StoreError.invalidEncoding }
+        let previous = try? self.secret(for: account)
         try removeSecret(for: account)
-        try addSecret(secret, for: account)
+        do {
+            try addSecret(secret, for: account)
+        } catch {
+            // Put the old value back, so a refused add never leaves nothing at all.
+            if let previous { try? addSecret(previous, for: account) }
+            throw error
+        }
     }
 
     /// Add-only: an item already there, perhaps planted, is refused rather than overwritten.

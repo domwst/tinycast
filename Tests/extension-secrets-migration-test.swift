@@ -85,7 +85,7 @@ struct ExtensionSecretsMigrationTests {
 
         let memory = MemoryVault()
         let storage = ExtensionStorage(directory: data, vault: memory.vault)
-        ExtensionSecretsMigration.run(storage: storage, installed: [owner], directory: data)
+        ExtensionSecretsMigration.run(storage: storage, installed: [owner])
         expect(memory.items["sample"]?["preference:apiKey"] == "key-\(marker)", "an extension password moves")
         expect(memory.items["sample"]?["preference:pin"] == "pin-\(marker)", "a command password moves")
         expect(memory.items["sample"]?["oauth:github"] == "tok-\(marker)", "a token set moves")
@@ -97,7 +97,7 @@ struct ExtensionSecretsMigrationTests {
 
         let again = ExtensionStorage(directory: data, vault: memory.vault)
         let before = memory.items
-        ExtensionSecretsMigration.run(storage: again, installed: [owner], directory: data)
+        ExtensionSecretsMigration.run(storage: again, installed: [owner])
         expect(memory.items == before, "a second run changes nothing")
 
         guard let locked = installed("locked", in: base) else { exit(1) }
@@ -105,14 +105,16 @@ struct ExtensionSecretsMigrationTests {
         let refusing = MemoryVault()
         refusing.refuses = true
         let blocked = ExtensionStorage(directory: data, vault: refusing.vault)
-        ExtensionSecretsMigration.run(storage: blocked, installed: [locked], directory: data)
+        ExtensionSecretsMigration.run(storage: blocked, installed: [locked])
+        blocked.setLocalStorage(extension: "locked", key: "later", value: .string("write"))
+        blocked.flush()
         let kept = fileText("locked", in: data)
         expect(
             kept.contains("key-\(marker)") && kept.contains("tok-\(marker)"),
-            "a refused Keychain loses nothing: the file keeps it for a later launch")
+            "a refused Keychain loses nothing, even across a later write: the file keeps it")
         refusing.refuses = false
         let retried = ExtensionStorage(directory: data, vault: refusing.vault)
-        ExtensionSecretsMigration.run(storage: retried, installed: [locked], directory: data)
+        ExtensionSecretsMigration.run(storage: retried, installed: [locked])
         expect(
             refusing.items["locked"]?["oauth:github"] == "tok-\(marker)"
                 && !fileText("locked", in: data).contains(marker),

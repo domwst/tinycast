@@ -325,6 +325,13 @@ struct AIChatTests {
         let invoker = RecordingInvoker(result: "deleted")
         let events = await collect(loop(base, invoker))
         expect(invoker.calls.isEmpty, "a tool the turn never offered is not invoked")
+        var inflated = AIUsage()
+        inflated.inputTokens = .max
+        inflated.outputTokens = 1
+        inflated.cachedInputTokens = .max
+        expect(
+            inflated.totalTokens == .max && inflated.contextTokens == .max,
+            "a provider's inflated token counts saturate instead of crashing the app")
         expect(
             events.contains(.toolResult(id: "c1", isError: true)),
             "and the model is told the call failed")

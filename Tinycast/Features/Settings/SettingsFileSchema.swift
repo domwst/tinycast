@@ -28,11 +28,11 @@ enum SettingsFileSchema {
         }
 
         /// A capability or a guard an edit may only move toward `safe`; the other way is refused.
-        func saferOnly(
-            _ path: ReferenceWritableKeyPath<AppSettings, Bool>, safe: Bool
+        func saferOnly<Root: AnyObject>(
+            _ root: Root, _ path: ReferenceWritableKeyPath<Root, Bool>, safe: Bool
         ) -> SettingsFileBinding {
-            bind(settings, path) { [settings] new in
-                new == safe || settings[keyPath: path] != safe ? new : nil
+            bind(root, path) { [root] new in
+                new == safe || root[keyPath: path] != safe ? new : nil
             }
         }
 
@@ -41,7 +41,7 @@ enum SettingsFileSchema {
             return shortcuts.binding(
                 for: key, action: .togglePalette, name: String(localized: "App Launcher"))
         case .showInMenuBar: return bind(settings, \.showInMenuBar)
-        case .automaticallyCheckForUpdates: return saferOnly(\.automaticallyCheckForUpdates, safe: false)
+        case .automaticallyCheckForUpdates: return saferOnly(settings, \.automaticallyCheckForUpdates, safe: false)
         case .popToRootTimeout: return bind(settings, \.popToRootTimeout)
         case .escapeKeyBehavior: return bind(settings, \.escapeKeyBehavior)
         case .autoSwitchInputSource: return bind(settings, \.autoSwitchInputSourceID)
@@ -79,12 +79,13 @@ enum SettingsFileSchema {
         case .quicklinksEnabled: return bind(settings, \.quicklinksEnabled)
         case .quicklinksShowInLauncher: return bind(settings, \.quicklinksShowInLauncher)
         case .quicklinkOpensNewWindow: return bind(settings, \.quicklinkOpensNewWindow)
-        case .quicklinkPassesSelectedText: return bind(settings, \.quicklinkPassesSelectedText)
+        case .quicklinkPassesSelectedText:
+            return saferOnly(settings, \.quicklinkPassesSelectedText, safe: false)
         case .quicklinkConfirmsBeforeDelete: return bind(settings, \.quicklinkConfirmsBeforeDelete)
         case .quicklinkCommands: return launcher.commandsBinding(for: key, owner: .quicklinks)
         case .appleShortcutsEnabled: return bind(settings, \.appleShortcutsEnabled)
         case .aiEnabled: return bind(settings, \.aiEnabled)
-        case .aiWebSearch: return bind(ai, \.webSearchEnabled)
+        case .aiWebSearch: return saferOnly(ai, \.webSearchEnabled, safe: false)
         case .aiChoices: return bind(ai, \.choicesEnabled)
         case .aiExpandsReasoning: return bind(ai, \.expandsReasoning)
         case .aiSystemPrompt: return bind(ai, \.systemPrompt)
@@ -150,10 +151,14 @@ enum SettingsFileSchema {
         case .windowRooms: return windowManagement.roomsBinding(for: key)
         case .windowManagementCommands:
             return launcher.commandsBinding(for: key, owner: .windowManagement)
-        case .clipboardEnabled: return saferOnly(\.clipboardEnabled, safe: false)
+        case .clipboardEnabled: return saferOnly(settings, \.clipboardEnabled, safe: false)
         case .clipboardRetention: return bind(settings, \.clipboardRetention)
         case .clipboardDefaultAction: return bind(settings, \.clipboardDefaultAction)
-        case .clipboardDisabledApps: return bind(settings, \.clipboardDisabledApps)
+        // The file may add an excluded app, never drop one, so its copies never start recording.
+        case .clipboardDisabledApps:
+            return bind(settings, \.clipboardDisabledApps) { [settings] new in
+                Set(new).isSuperset(of: settings.clipboardDisabledApps) ? new : nil
+            }
         case .clipboardCommands: return launcher.commandsBinding(for: key, owner: .clipboard)
         case .emojiSkinTone: return bind(settings, \.emojiSkinTone)
         case .emojiGridColumns: return bind(settings, \.emojiGridColumns)
@@ -162,8 +167,8 @@ enum SettingsFileSchema {
         case .calendarLauncherLimit: return bind(settings, \.calendarLauncherLimit)
         case .calendarSpan: return bind(settings, \.calendarSpan)
         case .joinWindowMinutes: return bind(settings, \.joinWindowMinutes)
-        case .autoJoinConfirms: return saferOnly(\.autoJoinConfirms, safe: true)
-        case .autoJoinNamedProvidersOnly: return saferOnly(\.autoJoinNamedProvidersOnly, safe: true)
+        case .autoJoinConfirms: return saferOnly(settings, \.autoJoinConfirms, safe: true)
+        case .autoJoinNamedProvidersOnly: return saferOnly(settings, \.autoJoinNamedProvidersOnly, safe: true)
         case .meetingBrowser: return bind(settings, \.meetingBrowserBundleID)
         case .calendarMenuBarDisplay: return bind(settings, \.calendarMenuBarDisplay)
         case .menuBarEvents: return bind(settings, \.menuBarEvents)

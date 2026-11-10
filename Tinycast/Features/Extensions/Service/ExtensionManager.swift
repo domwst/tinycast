@@ -135,8 +135,7 @@ final class ExtensionManager: ExtensionRuntimeDelegate, ExtensionHostContext {
         guard isEnabled else { return }
         if !secretsMigrated {
             secretsMigrated = true
-            ExtensionSecretsMigration.run(
-                storage: storage, installed: found, directory: ExtensionCatalog.storageDirectory())
+            ExtensionSecretsMigration.run(storage: storage, installed: found)
         }
         if found != installed {
             installed = found
@@ -893,6 +892,11 @@ final class ExtensionManager: ExtensionRuntimeDelegate, ExtensionHostContext {
         backgroundSessionID != nil ? .background : .userInitiated
     }
     var pasteTarget: NSRunningApplication? { coordinator?.pasteTarget }
+
+    var secureFormFieldIDs: Set<String> {
+        guard case .rendered(let tree) = state else { return [] }
+        return tree.passwordFieldIDs
+    }
     var applicationURLs: [URL] { coordinator?.applicationURLs ?? [] }
 
     func closeMainWindow(clearRootSearch: Bool) {

@@ -17,9 +17,12 @@ final class ExtensionStorage {
         var accessoryValues: [String: String] = [:]
         /// Each command's `storeValue` form fields, as the JSON the runtime wrote.
         var formValues: [String: [String: String]] = [:]
+        /// Token sets an older build wrote here, kept through rewrites until the migration runs.
+        var legacyOAuthTokens: [String: String] = [:]
 
         enum CodingKeys: String, CodingKey {
             case localStorage, caches, preferences, accessoryValues, formValues
+            case legacyOAuthTokens = "oauthTokens"
         }
 
         init() {}
@@ -38,6 +41,8 @@ final class ExtensionStorage {
                 try store.decodeIfPresent([String: String].self, forKey: .accessoryValues) ?? [:]
             formValues =
                 try store.decodeIfPresent([String: [String: String]].self, forKey: .formValues) ?? [:]
+            legacyOAuthTokens =
+                try store.decodeIfPresent([String: String].self, forKey: .legacyOAuthTokens) ?? [:]
         }
     }
 
@@ -132,11 +137,34 @@ final class ExtensionStorage {
     // MARK: - Form fields
 
     func formValues(extension name: String, command: String) -> [String: String] {
-        store(for: name).formValues[command] ?? [:]
+        var values = store(for: name).formValues[command] ?? [:]
+        let prefix = Self.formKey(command: command, field: "")
+        for (key, value) in secretValues(name) ?? [:] where key.hasPrefix(prefix) {
+            values[String(key.dropFirst(prefix.count))] = value
+        }
+        return values
     }
 
-    func setFormValues(extension name: String, command: String, values: [String: String]) {
-        mutate(name) { $0.formValues[command, default: [:]].merge(values) { $1 } }
+    /// A `secure` field's value goes to the vault; one the vault refuses is not remembered at all.
+    func setFormValues(
+        extension name: String, command: String, values: [String: String], secure: Set<String> = []
+    ) {
+        let plain = values.filter { !secure.contains($0.key) }
+        mutate(name) { store in
+            store.formValues[command, default: [:]].merge(plain) { $1 }
+            for field in secure { store.formValues[command]?.removeValue(forKey: field) }
+        }
+        let secrets = values.filter { secure.contains($0.key) }
+        guard !secrets.isEmpty else { return }
+        setSecrets(
+            Dictionary(uniqueKeysWithValues: secrets.map {
+                (Self.formKey(command: command, field: $0.key), $0.value)
+            }),
+            extension: name)
+    }
+
+    private static func formKey(command: String, field: String) -> String {
+        "form:\(command):\(field)"
     }
 
     // MARK: - Cache
@@ -246,9 +274,14 @@ final class ExtensionStorage {
         try? FileManager.default.removeItem(at: fileURL(for: name))
     }
 
-    /// Writes the file back from what this build keeps, dropping any section it no longer reads.
-    func rewrite(extension name: String) {
-        mutate(name) { _ in }
+    /// What `ExtensionSecretsMigration` still has to move; nothing else reads this section.
+    func legacyOAuthTokens(extension name: String) -> [String: String] {
+        store(for: name).legacyOAuthTokens
+    }
+
+    func dropLegacyOAuthTokens(extension name: String, providers: [String]) {
+        guard !providers.isEmpty else { return }
+        mutate(name) { store in providers.forEach { store.legacyOAuthTokens.removeValue(forKey: $0) } }
     }
 
     // MARK: - Secrets
@@ -261,8 +294,14 @@ final class ExtensionStorage {
     }
 
     private func setSecret(_ value: String?, for key: String, extension name: String) -> Bool {
+        setSecrets([key: value], extension: name)
+    }
+
+    /// One Keychain write for every change, so a form's fields cannot half-land.
+    @discardableResult
+    private func setSecrets(_ changes: [String: String?], extension name: String) -> Bool {
         guard var current = secretValues(name) else { return false }
-        current[key] = value
+        for (key, value) in changes { current[key] = value }
         guard (try? vault.save(current, name)) != nil else { return false }
         secrets[name] = current
         return true

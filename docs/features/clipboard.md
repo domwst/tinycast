@@ -25,7 +25,8 @@
 - **A paste lands only where it was aimed.** `Paster` remembers the pasteboard's `changeCount`
   after writing and drops the ⌘V if anything copied in the wait. A paste that activates an app waits
   up to half a second for that app to be frontmost, since ⌘V goes to whichever app has focus, and
-  is dropped rather than sent to another one.
+  is dropped rather than sent to another one. An extension's `Clipboard.paste` of a file goes through
+  the same `Paster.activateAndPaste`.
 - **Paste Sequentially never promotes, and its walk is frozen at the first press.** `PasteSequence`
   keeps every entry's id, newest first, and resolves each against the live history, so a promotion
   cannot repeat or skip an entry and a deleted one is passed over rather than pasted.

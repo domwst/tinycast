@@ -61,12 +61,12 @@ enum InstalledAIStreamDecoder {
     /// OpenCode counts reasoning beside `output`, where `AIUsage` counts it inside.
     private static func openCodeUsage(_ tokens: [String: Any], cost: Any?) -> AIUsage {
         let cache = tokens["cache"] as? [String: Any]
-        let cached = [cache?["read"], cache?["write"]].compactMap(integer).reduce(0, +)
+        let cached = [cache?["read"], cache?["write"]].compactMap(integer).reduce(0, AIUsage.sum)
         let reasoning = integer(tokens["reasoning"]) ?? 0
         let costUSD = (cost as? NSNumber)?.doubleValue ?? 0
         return AIUsage(
             inputTokens: integer(tokens["input"]),
-            outputTokens: integer(tokens["output"]).map { $0 + reasoning },
+            outputTokens: integer(tokens["output"]).map { AIUsage.sum($0, reasoning) },
             cachedInputTokens: cached > 0 ? cached : nil,
             reasoningTokens: reasoning > 0 ? reasoning : nil,
             costUSD: costUSD > 0 ? costUSD : nil)
@@ -165,7 +165,7 @@ enum InstalledAIStreamDecoder {
         return AIUsage(
             inputTokens: integer(usage["input_tokens"]),
             outputTokens: integer(usage["output_tokens"]),
-            cachedInputTokens: cached.isEmpty ? nil : cached.reduce(0, +),
+            cachedInputTokens: cached.isEmpty ? nil : cached.reduce(0, AIUsage.sum),
             reasoningTokens: integer(details?["thinking_tokens"]),
             contextWindow: integer(model?["contextWindow"]),
             costUSD: (result["total_cost_usd"] as? NSNumber)?.doubleValue)
@@ -173,7 +173,7 @@ enum InstalledAIStreamDecoder {
 
     private static func rank(_ model: [String: Any]) -> (prompt: Int, window: Int) {
         let prompt = ["inputTokens", "cacheReadInputTokens", "cacheCreationInputTokens"]
-            .compactMap { integer(model[$0]) }.reduce(0, +)
+            .compactMap { integer(model[$0]) }.reduce(0, AIUsage.sum)
         return (prompt, integer(model["contextWindow"]) ?? 0)
     }
 

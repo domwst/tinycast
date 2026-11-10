@@ -16,6 +16,7 @@ final class MCPHTTPTransport: MCPTransport {
     /// Closing is final, and cancels what is in flight, so a withdrawn server gets nothing more.
     private var isClosed = false
     private var inFlight: [UUID: URLSession] = [:]
+    private var notifications: [UUID: Task<Void, Never>] = [:]
 
     init(
         url: String, headerName: String, headerValue: String,
@@ -61,7 +62,11 @@ final class MCPHTTPTransport: MCPTransport {
         guard isConnected else { throw MCPTransportError.notRunning }
         let body = try MCPProtocol.notification(method: method, params: params)
         // Fire and forget: a notification has no reply to wait for, and 202 is the whole answer.
-        Task { [weak self] in _ = try? await self?.post(body, timeout: 15) }
+        let id = UUID()
+        notifications[id] = Task { [weak self] in
+            _ = try? await self?.post(body, timeout: 15)
+            self?.notifications[id] = nil
+        }
     }
 
     func close() {
@@ -70,6 +75,8 @@ final class MCPHTTPTransport: MCPTransport {
         sessionID = nil
         inFlight.values.forEach { $0.invalidateAndCancel() }
         inFlight.removeAll()
+        notifications.values.forEach { $0.cancel() }
+        notifications.removeAll()
     }
 
     private func post(
@@ -83,6 +90,8 @@ final class MCPHTTPTransport: MCPTransport {
         request.setValue("application/json, text/event-stream", forHTTPHeaderField: "Accept")
         request.setValue(protocolVersion, forHTTPHeaderField: "MCP-Protocol-Version")
         if let sessionID { request.setValue(sessionID, forHTTPHeaderField: "Mcp-Session-Id") }
+        // Checked before each token fetch too: a refresh is itself a request to the server.
+        guard !isClosed else { throw MCPTransportError.notRunning }
         let token = try await authorization?(nil)
         guard !isClosed else { throw MCPTransportError.notRunning }
         if let token {
@@ -98,15 +107,16 @@ final class MCPHTTPTransport: MCPTransport {
             session.invalidateAndCancel()
         }
         do {
-            let (data, response) = try await session.data(for: request)
+            let (data, response) = try await Self.receive(request, on: session)
             guard let response = response as? HTTPURLResponse else {
                 throw MCPTransportError.malformedResponse
             }
             if response.statusCode == 401, let authorization, let token {
+                guard !isClosed else { throw MCPTransportError.notRunning }
                 let refreshed = try await authorization(token)
                 guard !isClosed else { throw MCPTransportError.notRunning }
                 request.setValue("Bearer \(refreshed)", forHTTPHeaderField: "Authorization")
-                let (retried, reply) = try await session.data(for: request)
+                let (retried, reply) = try await Self.receive(request, on: session)
                 guard let reply = reply as? HTTPURLResponse else { throw MCPTransportError.malformedResponse }
                 if reply.statusCode == 401 { throw MCPOAuth.Failure.signInRequired }
                 return (retried, reply)
@@ -115,6 +125,21 @@ final class MCPHTTPTransport: MCPTransport {
         } catch let error as URLError {
             throw MCPTransportError.requestFailed(Self.networkMessage(error.code))
         }
+    }
+
+    /// A body past this is no reply worth reading, and holding it whole would exhaust memory first.
+    private static let bodyLimit = 16 * 1_048_576
+
+    private static func receive(
+        _ request: URLRequest, on session: URLSession
+    ) async throws -> (Data, URLResponse) {
+        let (bytes, response) = try await session.bytes(for: request)
+        var data = Data()
+        for try await byte in bytes {
+            guard data.count < bodyLimit else { throw MCPTransportError.malformedResponse }
+            data.append(byte)
+        }
+        return (data, response)
     }
 
     private func check(_ response: HTTPURLResponse) throws {

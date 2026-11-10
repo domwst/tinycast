@@ -51,10 +51,6 @@ final class MCPServerManager {
         armIdleTimer()
     }
 
-    func connection(slug: String) -> MCPServerConnection? {
-        connections.values.first { $0.server.slug == slug }
-    }
-
     func disconnect(_ id: UUID) {
         starts.removeValue(forKey: id)?.cancel()
         connections.removeValue(forKey: id)?.stop()

@@ -9,11 +9,11 @@ struct FileSearchIgnoreList: Sendable, Equatable {
         ".venv", "*.photoslibrary", "~/.Trash", "~/.cache", "~/.npm", "~/Library/Application Support",
         "~/Library/Caches", "~/Library/Containers", "~/Library/Developer", "~/Library/Group Containers",
         "~/Library/Mail", "/Library/Caches", "/private/var/folders"
-    ] + privacyProtected
+    ]
 
-    /// What macOS keeps from apps without Full Disk Access; the index must not hand its names out.
+    /// Never listed and never removable: settings can't hand out what Full Disk Access guards.
     static let privacyProtected = [
-        "~/Library/Messages", "~/Library/Safari", "~/Library/Calendars", "~/Library/Reminders",
+        "/System/Volumes/Data", "~/Library/Messages", "~/Library/Safari", "~/Library/Calendars", "~/Library/Reminders",
         "~/Library/Cookies", "~/Library/HomeKit", "~/Library/IdentityServices", "~/Library/Metadata",
         "~/Library/Suggestions", "~/Library/Biome", "~/Library/Accounts", "~/Library/Daemon Containers",
         "~/Library/Sharing", "~/Library/PersonalizationPortrait", "~/Library/Autosave Information"

@@ -106,7 +106,8 @@ final class ExtensionCoordinator {
         }
         let ref = ExtensionCommandRef(extensionName: owner.manifest.name, commandName: command.name)
         core.deepLinkCoordinator.runExtensionLink(
-            named: command.title, entryID: ref.entryID, query: query
+            named: "\(command.title) · \(owner.title)", entryID: ref.entryID, query: query,
+            input: link.inputSummary
         ) { [weak self] in
             // The question was a wait; a switch-off or uninstall meanwhile must still win.
             guard let self, settings.extensionsEnabled,

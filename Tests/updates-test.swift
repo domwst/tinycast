@@ -288,7 +288,7 @@ struct UpdatesTests {
         let release = ReleaseFeed.newest(from: unsigned, channel: .stable, architecture: .appleSilicon)
         expect(
             release != nil && release?.signatureURL == nil,
-            "a release without a signature is still offered, for the identity path to judge")
+            "a release without a signature is still offered; installing it is what refuses")
     }
 
     /// Any team once passed with the release key; now only the identity that signed this copy does.

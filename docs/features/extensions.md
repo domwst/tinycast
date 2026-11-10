@@ -37,15 +37,21 @@ produces, rendered natively into the palette. No Electron, no browser, no Node.j
   the installed set and clears the launcher rows;
   `refresh()` returns early while it is off, so nothing is scanned and nothing is held. Enabling is also
   consent to run third-party code, so it confirms first and never rides a settings backup.
-- **A secret never reaches an extension's JSON file.** Password preferences and OAuth token sets go
-  through `ExtensionSecretVault`, one Keychain item per extension under the `extension-secrets` scope.
-  A password left in the file by an older build is never read as one.
+- **A secret never reaches an extension's JSON file.** Password preferences, OAuth token sets and
+  the remembered value of a `Form.PasswordField` go through `ExtensionSecretVault`, one Keychain item
+  per extension under the `extension-secrets` scope, named from the exact manifest name so `@linear`
+  and `linear` never share one. The host finds password fields in the rendered
+  tree (`RenderTree.passwordFieldIDs`). A password left in the file by an older build is never read
+  as one, and its token sets stay in the file's `oauthTokens` until the migration has moved them.
 - **A name never leaves its folder.** `ExtensionManifest` drops a manifest whose name, flattened by
   `safeName` or as installed, is empty, hidden or `..`, and any command named that way or with a
   `/`. A store download must carry the manifest name of the listing it was fetched for.
 - **A link from outside asks before a command runs.** `ExtensionCoordinator.runDeepLink` goes
   through `DeepLinkCoordinator.runExtensionLink`, and Always Allow remembers the command with its
-  exact query, so trusting an extension never trusts every page that can name its commands.
+  exact query, so trusting an extension never trusts every page that can name its commands. The
+  question names the extension and shows `ExtensionDeepLink.inputSummary`, built from what was
+  parsed, with control and direction marks spelled out. A link that repeats an input is refused,
+  since the parser keeps the last copy, and so is one whose input is too long to show whole.
 - **`SymbolCatalog` reads a system bundle, not API.** The list comes from `CoreGlyphs.bundle` at
   runtime; every read stays optional and falls back to `SymbolCatalog.suggested`, and Apple's restricted
   marks are never offered.

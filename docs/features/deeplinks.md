@@ -145,7 +145,8 @@ so a new command fails to build until it is classed:
   screens, Settings, notes, chats, the create commands, Quick AI.
 - **Always asks**: window commands and sizes, layouts, rooms, system actions, quicklinks, snippets,
   custom commands, Apple Shortcuts, custom Quick Actions, the AI text actions, Paste Sequentially,
-  Open Camera, the meeting commands and Capture Window Layout.
+  Open Camera, the meeting commands, Capture Window Layout, and Check for Updates, which goes
+  online whatever automatic checks are set to.
 
 Input always asks because a page chose it: typed into the launcher it is one Return from a fallback
 row, and as arguments it reaches a script.

@@ -6,7 +6,7 @@ enum Paster {
     static let tinycastEventTag: Int64 = 0x54494E59
 
     /// Covers the gap between `activate()` returning and the target app accepting a keystroke.
-    private static let activationDelay: TimeInterval = 0.08
+    static let activationDelay: TimeInterval = 0.08
 
     /// Shorter: no activation to wait on, only the pasteboard write reaching the target's process.
     private static let directPostDelay: TimeInterval = 0.05
@@ -87,11 +87,13 @@ enum Paster {
 
     /// ⌘V goes to the HID tap, so it lands wherever focus is; it waits for `app` or is dropped.
     @MainActor
-    private static func activateAndPaste(into app: NSRunningApplication?) {
+    static func activateAndPaste(
+        into app: NSRunningApplication?, after delay: TimeInterval = activationDelay
+    ) {
         let generation = NSPasteboard.general.changeCount
         app?.activate()
-        let deadline = Date().addingTimeInterval(activationLimit)
-        DispatchQueue.main.asyncAfter(deadline: .now() + activationDelay) {
+        let deadline = Date().addingTimeInterval(delay + activationLimit)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
             postCommandV(into: app?.processIdentifier, generation: generation, until: deadline)
         }
     }

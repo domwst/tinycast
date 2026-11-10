@@ -608,6 +608,16 @@ struct MCPOAuthTests {
             try await withdrawn.connect()
             expect(false, "a closed transport stays closed")
         } catch { expect(true, "a closed transport stays closed") }
+        var fetches = 0
+        let notifying = try MCPHTTPTransport(url: base + "/mcp", headerName: "", headerValue: "") { _ in
+            fetches += 1
+            return "fixture-access"
+        }
+        try await notifying.connect()
+        try notifying.notify("notifications/initialized", nil)
+        notifying.close()
+        try? await Task.sleep(for: .milliseconds(200))
+        expect(fetches == 0, "a notification queued before close never fetches a token")
         var redirected = URLRequest(url: URL(string: base + "/redirect")!)
         redirected.setValue("Bearer fixture-access", forHTTPHeaderField: "Authorization")
         let (_, response) = try await MCPOAuthHTTP.send(redirected)

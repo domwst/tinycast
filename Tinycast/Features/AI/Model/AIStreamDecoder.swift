@@ -204,7 +204,7 @@ struct AIStreamDecoder: Sendable {
             usage.inputTokens = reported?.inputTokens ?? usage.inputTokens
             let cached = [reported?.cacheReadInputTokens, reported?.cacheCreationInputTokens]
                 .compactMap { $0 }
-            if !cached.isEmpty { usage.cachedInputTokens = cached.reduce(0, +) }
+            if !cached.isEmpty { usage.cachedInputTokens = cached.reduce(0, AIUsage.sum) }
             return [.usage(usage)]
         case "message_delta":
             usage.outputTokens = event.usage?.outputTokens ?? usage.outputTokens

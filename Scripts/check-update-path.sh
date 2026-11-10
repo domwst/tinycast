@@ -27,17 +27,17 @@ OLD="$(find "$WORK/expanded" -maxdepth 1 -name '*.app' | head -n1)"
 update_key() {
     /usr/libexec/PlistBuddy -c 'Print :TinycastUpdatePublicKey' "$1/Contents/Info.plist" 2>/dev/null || true
 }
+# An installed copy needs both: the zip signed by the key it ships, and its designated requirement.
 OLD_KEY="$(update_key "$OLD")"
-if [ -n "$OLD_KEY" ] && [ "$OLD_KEY" = "$(update_key "$APP")" ]; then
-    echo "✓ $TAG trusts this build's update key"
-    exit 0
+if [ -z "$OLD_KEY" ] || [ "$OLD_KEY" != "$(update_key "$APP")" ]; then
+    echo "::error::$TAG does not trust this build's update key, so it could never install it"
+    exit 1
 fi
 
 REQUIREMENT="$(codesign -d -r- "$OLD" 2>/dev/null | sed -n 's/^#* *designated => //p' || true)"
 [ -n "$REQUIREMENT" ] || { echo "✗ cannot read $TAG's designated requirement" >&2 && exit 1; }
-if codesign --verify --strict -R "=$REQUIREMENT" "$APP"; then
-    echo "✓ this build satisfies $TAG's designated requirement"
-    exit 0
+if ! codesign --verify --strict -R "=$REQUIREMENT" "$APP"; then
+    echo "::error::this build does not satisfy $TAG's designated requirement, so it could never install it"
+    exit 1
 fi
-echo "::error::$TAG trusts neither this build's update key nor its signature, so it could never install it"
-exit 1
+echo "✓ $TAG trusts this build's update key and its signature"

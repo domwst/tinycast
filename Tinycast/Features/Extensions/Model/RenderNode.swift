@@ -201,11 +201,26 @@ struct RenderNode: Sendable, Hashable, Identifiable {
         }
         return nil
     }
+
+    /// Every `id` of a descendant of `type`, hoisted slot props included.
+    func ids(ofType type: String) -> Set<String> {
+        var found: Set<String> = self.type == type ? Set([string("id")].compactMap { $0 }) : []
+        for child in children { found.formUnion(child.ids(ofType: type)) }
+        for value in props.values {
+            for node in value.nodesValue { found.formUnion(node.ids(ofType: type)) }
+        }
+        return found
+    }
 }
 
 /// The root the runtime pushes after every commit: one `__screen` per stack entry.
 struct RenderTree: Sendable, Equatable {
     let screens: [RenderNode]
+
+    /// Fields whose remembered value is a secret, so the host keeps it out of the JSON file.
+    var passwordFieldIDs: Set<String> {
+        screens.reduce(into: []) { $0.formUnion($1.ids(ofType: "Form.PasswordField")) }
+    }
 
     init(screens: [RenderNode]) {
         self.screens = screens

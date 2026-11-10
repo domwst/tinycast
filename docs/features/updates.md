@@ -23,8 +23,9 @@ uninstall` and `brew list` keep working unchanged.
   anyway, and an app that still carries the flag is refused rather than installed.
 - **The running copy's identity always decides.** A downloaded bundle is trusted only when its seal
   passes strict validation, nested helpers included, _and_ it satisfies the designated requirement
-  of the copy that is running, read once before the download as `Staged.requirement`. A release key
-  signature, when the feed lists one, must verify too; one that fails to download is no verdict.
+  of the copy that is running, read once before the download as `Staged.requirement`. The zip must
+  also carry a release key signature that downloads and verifies, or nothing is expanded: a zip can
+  be built to fill the disk, and only the key holder may make Tinycast unpack one.
   This fork dropped "Developer ID from any team": with it, a same-user process that planted an app in
   the staging folder needed only some Developer ID. A new Apple team therefore means installing by
   hand once. `notarized` is deliberately not checked: it resolves the ticket through `syspolicyd` or
@@ -141,11 +142,12 @@ One route, whatever the install came from:
 3. Check quarantine natively; clear it if somehow present, and refuse the update if it survives.
 4. Verify that the code signature is valid and satisfies the running copy's own designated
    requirement, then the bundle id and the version, and record its code-directory hash. A `.sig`
-   that fails to download is logged and treated as absent; one that downloads must verify.
+   that is missing, fails to download or fails to verify stops the update before step 2.
 5. Offer Relaunch. At quit, by Relaunch or otherwise, the staged bundle is checked again against
    that hash, so a copy changed since staging is discarded, and `FileManager.replaceItemAt` swaps
-   it in, keeping the old copy until the bundle now in place passes the same check, and putting the
-   old copy back if it does not. The staging folder is on the same volume as `/Applications`, which is what lets this be
+   it in, keeping the old copy until the bundle now in place passes the same check. If it does not,
+   the old copy goes back only when it still matches `Staged.runningHash`, the copy that ran;
+   otherwise the unverified bundle goes to the Trash, so nothing unchecked stays installed. The staging folder is on the same volume as `/Applications`, which is what lets this be
    atomic. A copy Tinycast cannot write is reported before the download starts, not worked around;
    there is no privileged helper.
 6. Relaunch spawns a detached waiter that reopens the app once this process exits — `open` on a

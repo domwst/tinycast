@@ -17,7 +17,9 @@ in `Features/Settings/` (`Model/`, `Service/`, `SettingsFileSchema.swift`), the 
   Preview, Quick Actions, MCP and clipboard text recognition are switched on only in the app, which
   asks first. `settings-file-test` checks those paths stay absent.
 - **A key that guards something only moves the safe way.** `clipboard.enabled` may turn capture off,
-  never on, `general.automaticallyCheckForUpdates` may stop checks, never start them, and `calendar.autoJoinConfirms` and `calendar.autoJoinNamedProvidersOnly` may be raised,
+  never on, `general.automaticallyCheckForUpdates` may stop checks, never start them,
+  `ai.webSearch` and `quicklinks.passesSelectedText` may turn off, never on,
+  `clipboard.disabledApps` may only grow, and `calendar.autoJoinConfirms` and `calendar.autoJoinNamedProvidersOnly` may be raised,
   never lowered. `SettingsFileSchema.saferOnly` refuses the other direction as an invalid value,
   unless the setting already sits there.
 - **Removing a key ships a migration that strips it.** The import reports a key it no longer knows on

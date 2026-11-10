@@ -9,6 +9,8 @@ protocol ExtensionHostContext: AnyObject {
     /// Background runs report no UI: toasts, HUDs and dialogs would fire on a timer.
     var activeLaunchType: ExtensionLaunchType { get }
     var storage: ExtensionStorage { get }
+    /// The rendered form's password fields, whose remembered values belong in the vault.
+    var secureFormFieldIDs: Set<String> { get }
     /// The app a paste would land in — the palette's recorded `previousApp`.
     var pasteTarget: NSRunningApplication? { get }
     /// Every app bundle `getApplications()` reports, from the user's own search scopes.
@@ -222,12 +224,7 @@ final class ExtensionHostBridge: ExtensionHostAPI {
                 if method == "paste" { context?.closeMainWindow(clearRootSearch: false) }
                 writeFileToPasteboard(path, concealed: method == "copy" && concealed)
                 guard method == "paste" else { return nil }
-                target?.activate()
-                Task { @MainActor in
-                    try? await Task.sleep(for: .milliseconds(350))
-                    guard !Task.isCancelled else { return }
-                    Paster.postCommandV()
-                }
+                Paster.activateAndPaste(into: target, after: 0.35)
                 return nil
             }
             guard let text = clipboardText(from: content) else { return nil }
@@ -356,7 +353,8 @@ final class ExtensionHostBridge: ExtensionHostAPI {
             let values = arguments[safe: 1]?.objectValue?.compactMapValues(\.stringValue),
             !values.isEmpty
         else { return nil }
-        context.storage.setFormValues(extension: name, command: command, values: values)
+        context.storage.setFormValues(
+            extension: name, command: command, values: values, secure: context.secureFormFieldIDs)
         return nil
     }
 

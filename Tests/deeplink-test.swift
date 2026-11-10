@@ -374,6 +374,9 @@ struct DeepLinkTests {
         expect(
             DeepLinkConsentPolicy.extensionParts(ofKey: "system-action:lock-screen") == nil,
             "a built-in key is never read as an extension one")
+        expect(
+            DeepLinkConsentPolicy.displayable("safe\u{202E}txt.exe\n") == "safe\\u{202E}txt.exe\\n",
+            "direction and control marks are spelled out, so shown text cannot be reordered")
     }
 
     static func consentChecks() {
@@ -389,6 +392,9 @@ struct DeepLinkTests {
         expect(
             DeepLinkConsentPolicy.requiresConsent(.command(.openCamera)),
             "turning the camera on asks first")
+        expect(
+            DeepLinkConsentPolicy.requiresConsent(.command(.checkForUpdates)),
+            "going online to check for updates asks first")
         expect(
             DeepLinkConsentPolicy.requiresConsent(.windowCommand(id: .leftHalf)),
             "moving another app's window asks first")

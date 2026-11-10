@@ -54,12 +54,16 @@ not read MCP settings. `AIChatCoordinator.send` is the one place the two meet.
   never allowed to persist a decision, and `.never` is set on the server's row in Settings.
   `MCPTrustPolicy` is the whole rule and it is pure.
 - **Withdrawal wins over work in flight.** A transport's `close()` is final: a stdio lookup that
-  finishes afterwards never launches, and an HTTP request rechecks after its token fetch and before
-  a 401 retry, while `close()` cancels the sessions in flight. `MCPServerManager` owns every start
+  finishes afterwards never launches, and an HTTP request rechecks before and after each token fetch,
+  while `close()` cancels the sessions and queued notifications in flight. `MCPServerManager` owns every start
   task it queues and cancels it on stop, removal or disconnect.
 - **A call runs only a tool its turn offered.** `AIToolSession` refuses any other name before it
   reaches `MCPCoordinator.invoke`, so a model or a page it read cannot reach a server the chat
-  excluded, even one set to Always Allow.
+  excluded, even one set to Always Allow. `invoke` resolves the wire name to the one connected tool
+  that carries it, with its own server ID and original name, and never parses the name: `docsé`
+  and `docs` sanitize to overlapping prefixes. A wire name two tools share is offered as neither.
+- **An HTTP reply is bounded while it arrives.** `MCPHTTPTransport` stops reading a body at 16 MB,
+  so a hostile server cannot exhaust memory before the result limit ever applies.
 - **A refused or failed call is content, never a thrown error.** It comes back as an `AIToolResult`
   the model can read and work around, so a declined tool ends in an honest sentence rather than a
   failed turn.

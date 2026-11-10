@@ -203,6 +203,14 @@ struct DictationWorkerTest {
                 protocolClasses: [DownloadFixture.self])
             fatalError("Invalid checksum installed a model")
         } catch let error as URLError where error.code == .badServerResponse {}
+        DownloadFixture.state.withLock { $0 = .init(oversized: true) }
+        do {
+            try await DictationModelDownloader.download(
+                .redux, destination: root.appending(path: "oversized"),
+                baseURL: base, files: DownloadFixture.files(for: .redux),
+                protocolClasses: [DownloadFixture.self])
+            fatalError("A file larger than its pinned size installed a model")
+        } catch let error as URLError where error.code == .badServerResponse {}
         let expectedNames = (preserved + models.map(\.folderName)).sorted()
         guard try manager.contentsOfDirectory(atPath: root.path).sorted() == expectedNames else {
             fatalError("Atomic installation retained staging files")
@@ -232,6 +240,7 @@ private final class DownloadFixture: URLProtocol, @unchecked Sendable {
     struct State {
         var hold = false
         var corrupt = false
+        var oversized = false
     }
 
     static let state = Mutex(State())
@@ -259,7 +268,10 @@ private final class DownloadFixture: URLProtocol, @unchecked Sendable {
             fatalError("The downloader asked the host what a model holds instead of using its pinned list")
         }
         let state = Self.state.withLock { $0 }
-        let data = state.corrupt ? Data(repeating: 66, count: Self.content.count) : Self.content
+        let data =
+            state.oversized
+            ? Data(repeating: 65, count: Self.content.count * 64)
+            : state.corrupt ? Data(repeating: 66, count: Self.content.count) : Self.content
         client?.urlProtocol(self, didLoad: state.hold ? data.prefix(1024) : data)
         if state.hold { return }
         client?.urlProtocolDidFinishLoading(self)

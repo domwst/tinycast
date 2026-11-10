@@ -37,10 +37,13 @@ enum AppLauncher {
 
     /// No AppKit route for Get Info, so this drives Finder over Apple events — seconds when cold.
     static func showInfoInFinder(_ url: URL) async -> Bool {
+        // A file's name is anyone's to choose, so a quote in it must not end the string and run on.
+        let path = url.path.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
         let source = """
             tell application "Finder"
                 activate
-                open information window of (POSIX file "\(url.path)" as alias)
+                open information window of (POSIX file "\(path)" as alias)
             end tell
             """
         return await Task.detached(priority: .userInitiated) {

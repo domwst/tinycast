@@ -776,7 +776,7 @@ private struct ContextCard: View {
     }
 
     private func input(_ usage: AIUsage) -> String {
-        let prompt = (usage.inputTokens ?? 0) + (usage.cachedInputTokens ?? 0)
+        let prompt = AIUsage.sum(usage.inputTokens ?? 0, usage.cachedInputTokens ?? 0)
         guard let cached = usage.cachedInputTokens, cached > 0 else { return prompt.formatted() }
         return String(localized: "\(prompt.formatted()) · \(cached.formatted()) cached")
     }

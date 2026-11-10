@@ -73,9 +73,11 @@ final class MCPCoordinator {
     /// What this turn may reach: everything enabled, or one server when `@slug` named it.
     func tools(scopedTo slug: String?) -> [AITool] {
         guard isActive else { return [] }
+        // A wire name two tools share is offered as neither, since a call to it could reach either.
+        let uses = Dictionary(manager.tools.map { ($0.wireName, 1) }, uniquingKeysWith: +)
         return manager.tools
             .filter { tool in
-                guard slug == nil || tool.serverSlug == slug else { return false }
+                guard uses[tool.wireName] == 1, slug == nil || tool.serverSlug == slug else { return false }
                 return store.server(id: tool.serverID)?.trust != .never
             }
             .map(\.aiTool)
@@ -108,19 +110,21 @@ final class MCPCoordinator {
     }
 
     func invoke(_ call: AIToolCall, in chat: UUID) async -> AIToolResult {
-        guard let route = MCPToolName.parse(call.name),
-            let server = server(slug: route.slug),
-            let connection = manager.connection(slug: route.slug)
+        // Resolved, never parsed: two slugs can sanitize to one prefix and route a call elsewhere.
+        let matches = manager.tools.filter { $0.wireName == call.name }
+        guard isActive, matches.count == 1, let tool = matches.first,
+            let server = store.enabledServers.first(where: { $0.id == tool.serverID }),
+            let connection = manager.connections[tool.serverID]
         else {
             return .failure(call.id, "That tool is no longer connected.")
         }
-        guard await isPermitted(server, tool: route.tool, in: chat) else {
+        guard await isPermitted(server, tool: tool.name, in: chat) else {
             return .failure(call.id, "The user declined this tool call.")
         }
         manager.markUsed()
         do {
             let (content, isError) = try await connection.call(
-                route.tool, arguments: JSONValue(data: Data(call.arguments.utf8)) ?? .object([:]))
+                tool.name, arguments: JSONValue(data: Data(call.arguments.utf8)) ?? .object([:]))
             return AIToolResult(callID: call.id, content: content, isError: isError)
         } catch {
             return .failure(call.id, error.localizedDescription)

@@ -62,7 +62,9 @@ enum DictationModelDownloader {
             try fileManager.createDirectory(
                 at: target.deletingLastPathComponent(),
                 withIntermediateDirectories: true)
-            let response = try await downloadFile(from: url, to: target, using: session) { bytes in
+            let response = try await downloadFile(
+                from: url, to: target, limit: file.size, using: session
+            ) { bytes in
                 onProgress(completed + min(size, max(0, bytes)), expected)
             }
             try Task.checkCancellation()
@@ -95,13 +97,14 @@ enum DictationModelDownloader {
     }
 
     private static func downloadFile(
-        from url: URL, to destination: URL, using session: URLSession,
+        from url: URL, to destination: URL, limit: Int64, using session: URLSession,
         onProgress: @escaping @Sendable (Int64) -> Void
     ) async throws -> URLResponse {
         let responses = AsyncThrowingStream<URLResponse, any Error> { continuation in
             let task = session.downloadTask(with: url)
             task.delegate = Transfer(
-                destination: destination, responses: continuation, onProgress: onProgress)
+                destination: destination, limit: limit, responses: continuation,
+                onProgress: onProgress)
             continuation.onTermination = { _ in task.cancel() }
             task.resume()
         }
@@ -111,15 +114,19 @@ enum DictationModelDownloader {
 
     private final class Transfer: NSObject, URLSessionDownloadDelegate {
         private let destination: URL
+        /// The pinned size: a host sending more is cut off then, not after it has filled the disk.
+        private let limit: Int64
         private let responses: AsyncThrowingStream<URLResponse, any Error>.Continuation
         private let onProgress: @Sendable (Int64) -> Void
         private let lastUpdate = Mutex<ContinuousClock.Instant?>(nil)
 
         init(
-            destination: URL, responses: AsyncThrowingStream<URLResponse, any Error>.Continuation,
+            destination: URL, limit: Int64,
+            responses: AsyncThrowingStream<URLResponse, any Error>.Continuation,
             onProgress: @escaping @Sendable (Int64) -> Void
         ) {
             self.destination = destination
+            self.limit = limit
             self.responses = responses
             self.onProgress = onProgress
         }
@@ -128,6 +135,11 @@ enum DictationModelDownloader {
             _ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData: Int64,
             totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64
         ) {
+            guard totalBytesWritten <= limit, totalBytesExpectedToWrite <= limit else {
+                downloadTask.cancel()
+                responses.finish(throwing: URLError(.badServerResponse))
+                return
+            }
             let now = ContinuousClock.now
             let shouldUpdate = lastUpdate.withLock { last in
                 if let last, now - last < .milliseconds(100) { return false }

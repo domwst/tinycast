@@ -30,9 +30,12 @@ design follows [fsearch](https://github.com/noahdunnagan/fsearch).
   any build and deletes `Application Support/<bundle id>/FileIndex/`.
 - **The index never lists what Full Disk Access guards in `~/Library`.** The crawl runs with
   Tinycast's grants, but `index.bin` is readable by anything running as you, so
-  `FileSearchIgnoreList.privacyProtected` skips Messages, Safari, Calendars and the other private
-  stores by default. Desktop, Documents, Downloads and iCloud Drive are indexed by design: finding
-  their files is the point, and their names sit in the index unencrypted.
+  `FileSearchIgnoreList.privacyProtected` skips Messages, Safari, Calendars, the other private
+  stores and `/System/Volumes/Data`, the second path to all of them. `FileSearchPolicy` adds that
+  list itself, so it is never shown and no setting, file or import can remove it, and
+  `FileSearchPolicy.ignoresRoot` drops a scope that sits inside an ignored folder, since the crawl
+  filters only what it lists. Desktop, Documents, Downloads and iCloud Drive are indexed by design:
+  finding their files is the point, and their names sit in the index unencrypted.
 - **The shipped ignore rules are compiled in and never persisted.** `fileSearchIgnorePatterns` stores
   only what the user added and `fileSearchRemovedDefaultPatterns` only the shipped rules they removed,
   so changing `FileSearchIgnoreList.defaults` reaches installs that already ran. Every row can be

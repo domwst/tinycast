@@ -39,11 +39,23 @@ struct FileSearchPolicy: Sendable, Equatable {
         // Not standardized: that drops a leading `/private`, and the crawl compares real paths.
         homePath = homeDirectory.path
         roots = FileSearchScope.roots(for: request.scopes, homeDirectory: homeDirectory)
-        ignore = FileSearchIgnoreList(patterns: request.ignorePatterns, homeDirectory: homeDirectory)
-        fingerprint = Self.fnv1a((roots + ["\0"] + request.ignorePatterns).joined(separator: "\n"))
+        let patterns = request.ignorePatterns + FileSearchIgnoreList.privacyProtected
+        ignore = FileSearchIgnoreList(patterns: patterns, homeDirectory: homeDirectory)
+        fingerprint = Self.fnv1a((roots + ["\0"] + patterns).joined(separator: "\n"))
     }
 
     static func == (lhs: Self, rhs: Self) -> Bool { lhs.request == rhs.request }
+
+    /// The crawl filters only what it lists, so a scope inside an ignored folder is checked here.
+    func ignoresRoot(_ path: String) -> Bool {
+        var current = path
+        while current.count > 1 {
+            let name = (current as NSString).lastPathComponent
+            if ignore.excludes(name: name, path: current) { return true }
+            current = (current as NSString).deletingLastPathComponent
+        }
+        return false
+    }
 
     /// A folder's files inherit its prior, so it is worked out once per folder.
     func prior(of path: String) -> Int8 {

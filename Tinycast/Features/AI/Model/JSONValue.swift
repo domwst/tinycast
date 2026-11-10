@@ -13,10 +13,11 @@ enum JSONValue: Equatable, Sendable {
         switch value {
         case is NSNull: self = .null
         // `0`/`1` bridge to Bool too, so only a CFBoolean box counts as one.
+        case let value as NSNumber where CFGetTypeID(value) == CFBooleanGetTypeID():
+            self = .bool(value.boolValue)
         case let value as NSNumber:
-            self =
-                CFGetTypeID(value) == CFBooleanGetTypeID()
-                ? .bool(value.boolValue) : .number(value.doubleValue)
+            // `-1e400` parses to infinity, which `JSONSerialization` then refuses to write at all.
+            self = value.doubleValue.isFinite ? .number(value.doubleValue) : .null
         case let value as String: self = .string(value)
         case let value as [Any]: self = .array(value.map(JSONValue.init))
         case let value as [String: Any]: self = .object(value.mapValues(JSONValue.init))

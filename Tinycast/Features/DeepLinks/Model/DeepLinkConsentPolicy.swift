@@ -29,9 +29,26 @@ enum DeepLinkConsentPolicy {
             entryID.hasPrefix(extensionEntryPrefix)
         else { return nil }
         guard split.count == 2 else { return (entryID, nil) }
-        let query = String(split[1]).removingPercentEncoding ?? String(split[1])
+        let query = displayable(String(split[1]).removingPercentEncoding ?? String(split[1]))
         let summary = query.count > summaryLength ? String(query.prefix(summaryLength)) + "…" : query
         return (entryID, summary)
+    }
+
+    /// A question that has to cut its input short would hide part of what runs, so it is not asked.
+    static let longestAskableInput = 600
+
+    /// Control and direction marks are spelled out, so text cannot reorder or hide what it shows.
+    static func displayable(_ text: String) -> String {
+        var shown = ""
+        for scalar in text.unicodeScalars {
+            switch scalar.properties.generalCategory {
+            case .control, .format, .lineSeparator, .paragraphSeparator:
+                shown += scalar.escaped(asASCII: true)
+            default:
+                shown.unicodeScalars.append(scalar)
+            }
+        }
+        return shown
     }
 
     private static let extensionEntryPrefix = "extension:"
@@ -68,15 +85,14 @@ enum DeepLinkConsentPolicy {
         switch id {
         case .fixGrammar, .rewrite, .translate, .summarize, .pasteSequentially, .openCamera,
             .joinNextMeeting, .copyMeetingLink, .openInCalendar, .captureWindowLayout, .openInBrowser,
-            .runShellCommand, .quit:
+            .runShellCommand, .quit, .checkForUpdates:
             true
         case .quickAI, .aiChat, .calculatorHistory, .clipboardHistory, .searchEmoji, .searchFiles,
             .searchMenuItems, .switchWindows, .switchWindowsBackwards, .createCustomCommand,
             .searchCustomCommands, .define, .mySchedule, .createEvent, .showNotes, .createNote,
             .searchNotes, .createWindowLayout, .switchRoom, .createRoom, .createQuicklink,
             .searchQuicklinks, .importQuicklinks, .exportQuicklinks, .searchSnippets, .createSnippet,
-            .exportSettings, .importSettings, .importFromRaycast, .checkForUpdates, .settings, .about,
-            .support:
+            .exportSettings, .importSettings, .importFromRaycast, .settings, .about, .support:
             false
         }
     }

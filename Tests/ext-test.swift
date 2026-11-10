@@ -992,6 +992,21 @@ struct ExtensionTests {
             bare?.ownerOrAuthor == nil && bare?.extensionName == "demo"
                 && bare?.commandName == "search")
 
+        let repeated = URL(
+            string: "raycast://extensions/o/demo/search?arguments=%7B%22q%22%3A%22weather%22%7D"
+                + "&launchType=background&arguments=%7B%22q%22%3A%22evil%22%7D")!
+        check(
+            "a link that repeats an input is refused, so the question can't show the wrong one",
+            ExtensionDeepLink.parse(url: repeated) == nil)
+        let shown = ExtensionDeepLink.parse(
+            url: URL(
+                string: "raycast://extensions/o/demo/search?arguments=%7B%22q%22%3A%22x%22%7D"
+                    + "&launch_type=background&context=%7B%22id%22%3A1%7D")!)?.inputSummary ?? ""
+        check(
+            "the consent summary lists what was parsed, labelled",
+            shown.contains("q = x") && shown.contains(#"{"id":1}"#) && shown.contains("background"),
+            shown)
+
         let installURL = URL(string: "raycast://extensions/linear/linear?source=webstore")!
         let install = ExtensionDeepLink.Route.storeInstall(.init(handle: "linear", name: "linear"))
         check(

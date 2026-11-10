@@ -47,6 +47,7 @@ nonisolated enum FileIndexCrawler {
             guard let resolved = realpath(root, nil) else { return nil }
             defer { free(resolved) }
             let path = String(cString: resolved)
+            guard !policy.ignoresRoot(path) else { return nil }
             return (path, policy.prior(of: path))
         }
     }

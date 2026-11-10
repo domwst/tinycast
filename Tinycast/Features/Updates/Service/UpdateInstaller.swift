@@ -28,6 +28,8 @@ struct UpdateInstaller: Sendable {
         let app: URL
         let requirement: String
         let codeHash: Data
+        /// The copy running now, so a rollback restores it and never something put in its place.
+        let runningHash: Data
     }
 
     let bundleURL: URL
@@ -44,9 +46,9 @@ struct UpdateInstaller: Sendable {
         guard FileManager.default.isWritableFile(atPath: location.path),
             FileManager.default.isWritableFile(atPath: bundleURL.path)
         else { throw UpdateFailure.replaceFailed(location.path) }
-        guard let requirement = BundleSignature.runningRequirement() else {
-            throw UpdateFailure.identityMismatch
-        }
+        guard let requirement = BundleSignature.runningRequirement(),
+            let runningHash = BundleSignature.trustedHash(of: bundleURL, requirement: requirement)
+        else { throw UpdateFailure.identityMismatch }
         try? FileManager.default.createDirectory(
             at: stagingDirectory, withIntermediateDirectories: true)
         let archive = stagingDirectory.appendingPathComponent("\(release.tag).zip")
@@ -80,7 +82,8 @@ struct UpdateInstaller: Sendable {
         do {
             let codeHash = try verify(staged, is: release, requirement: requirement)
             try Task.checkCancellation()
-            return Staged(app: staged, requirement: requirement, codeHash: codeHash)
+            return Staged(
+                app: staged, requirement: requirement, codeHash: codeHash, runningHash: runningHash)
         } catch {
             try? FileManager.default.removeItem(at: expanded)
             throw error
@@ -111,20 +114,32 @@ struct UpdateInstaller: Sendable {
         guard BundleSignature.trustedHash(of: installed, requirement: staged.requirement)
             == staged.codeHash
         else {
-            _ = try? FileManager.default.replaceItemAt(
-                installed, withItemAt: backup, options: .usingNewMetadataOnly)
+            rollBack(installed, to: backup, expecting: staged)
             throw UpdateFailure.replaceFailed(bundleURL.path)
         }
         try? FileManager.default.removeItem(at: backup)
+    }
+
+    /// The old copy goes back only if it is still the one that ran; else nothing unverified stays.
+    private func rollBack(_ installed: URL, to backup: URL, expecting staged: Staged) {
+        let fileManager = FileManager.default
+        if BundleSignature.trustedHash(of: backup, requirement: staged.requirement) == staged.runningHash,
+            (try? fileManager.replaceItemAt(installed, withItemAt: backup, options: .usingNewMetadataOnly))
+                != nil
+        {
+            return
+        }
+        try? fileManager.trashItem(at: installed, resultingItemURL: nil)
+        try? fileManager.removeItem(at: backup)
     }
 
     private var runningVersion: String? {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
     }
 
-    /// A signature that fails to download is no verdict, since the running identity still decides.
+    /// Nothing is expanded unless the release key signed it: a zip can be built to fill the disk.
     private func signatureHolds(_ archive: URL, by signatureURL: URL?) async throws -> Bool {
-        guard let signatureURL else { return true }
+        guard let signatureURL else { return false }
         let signature: Data
         do {
             signature = try await UpdateDownloader.data(from: signatureURL)
@@ -132,7 +147,7 @@ struct UpdateInstaller: Sendable {
             try Task.checkCancellation()
             Self.logger.error(
                 "Fetching the update signature failed: \(error.localizedDescription, privacy: .public)")
-            return true
+            return false
         }
         return UpdateSignature.isSigned(archive, by: signature)
     }
