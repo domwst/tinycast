@@ -23,6 +23,9 @@ bottom with the model picker. ⌘J hands a Quick AI conversation to the window.
 - **A provider's credentials stay with its origin.** Generation and model discovery sessions use
   `AIRedirectPolicy`, which follows a redirect only to the same scheme, host and port, so an
   `x-api-key`, a custom header or a 307's chat body never reaches another host.
+- **Discovery waits until the base URL is finished.** The connection editor asks for models only
+  once the URL field is submitted or loses focus, never mid-typing: `api.provider.co` on the way to
+  `.com` is a real domain someone may own, and the request carries the key and headers.
 - **Installed model discovery is per-provider.** Settings → AI → Providers keeps Codex, Claude, Grok,
   OpenCode and Cursor visible with an individual toggle for each, all off by default. Turning one off cancels
   its check, clears its catalog and releases its process; Apple Intelligence is the default route when

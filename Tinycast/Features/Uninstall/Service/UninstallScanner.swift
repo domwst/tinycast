@@ -115,8 +115,11 @@ enum UninstallScanner {
                         path: path, rootPath: rootPath, home: environment.home,
                         bundlePath: bundlePath)
                 else { return nil }
-                return row(
+                var found = row(
                     path: path, evidence: match.evidence, environment: environment, parent: parent)
+                found?.isShared =
+                    identity.sharesBundleID && [.bundleID, .groupContainer].contains(match.evidence)
+                return found
             }
     }
 

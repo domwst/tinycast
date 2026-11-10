@@ -75,6 +75,18 @@ final class ExtensionManager: ExtensionRuntimeDelegate, ExtensionHostContext {
         // Not gated on `isEnabled`: a stranded workspace is ours whether or not the feature is on.
         let temp = FileManager.default.temporaryDirectory
         Task.detached(priority: .utility) { ExtensionCleanup.sweepWorkspaces(in: temp) }
+        // Nor this: a password left in plain JSON is readable whether extensions run or not.
+        Task { [weak self] in
+            let found = await Task.detached(priority: .utility) { ExtensionCatalog.scan() }.value
+            self?.migrateSecrets(of: found)
+        }
+    }
+
+    /// Once per launch, whichever comes first: this sweep at start or the first enabled scan.
+    private func migrateSecrets(of installed: [InstalledExtension]) {
+        guard !secretsMigrated else { return }
+        secretsMigrated = true
+        ExtensionSecretsMigration.run(storage: storage, installed: installed)
     }
 
     // MARK: - The switches
@@ -133,10 +145,7 @@ final class ExtensionManager: ExtensionRuntimeDelegate, ExtensionHostContext {
         guard isEnabled else { return }
         let found = await Task.detached(priority: .utility) { ExtensionCatalog.scan() }.value
         guard isEnabled else { return }
-        if !secretsMigrated {
-            secretsMigrated = true
-            ExtensionSecretsMigration.run(storage: storage, installed: found)
-        }
+        migrateSecrets(of: found)
         if found != installed {
             installed = found
             publishLauncherEntries()

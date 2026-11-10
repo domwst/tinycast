@@ -35,8 +35,12 @@ produces, rendered natively into the palette. No Electron, no browser, no Node.j
 - **Off means off.** `extensionsEnabled` is opt-in, and `ExtensionManager.setEnabled(false)` stops the
   foreground and menu commands, removes status items and refresh tasks, discards JS contexts, empties
   the installed set and clears the launcher rows;
-  `refresh()` returns early while it is off, so nothing is scanned and nothing is held. Enabling is also
-  consent to run third-party code, so it confirms first and never rides a settings backup.
+  `refresh()` returns early while it is off, so nothing is scanned and nothing is held. The one
+  exception is the launch sweep that moves secrets an older build left in plain JSON: it reads the
+  manifests once and runs nothing. Enabling is also consent to run third-party code, so it confirms
+  first and never rides a settings backup.
+- **A password argument is typed out of sight.** `CommandArgumentsRow` draws an argument whose
+  `type` is `password` as a secure field, and Copy Deeplink leaves its value out of the link.
 - **A secret never reaches an extension's JSON file.** Password preferences, OAuth token sets and
   the remembered value of a `Form.PasswordField` go through `ExtensionSecretVault`, one Keychain item
   per extension under the `extension-secrets` scope, named from the exact manifest name so `@linear`

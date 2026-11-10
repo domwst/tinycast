@@ -163,6 +163,9 @@ final class CalendarStore {
             let calendar = event.calendar
         else { return nil }
         let me = event.attendees?.first { $0.isCurrentUser }
+        let accepted =
+            (event.attendees ?? []).isEmpty || event.organizer?.isCurrentUser == true
+            || me?.participantStatus == .accepted
         return MeetingEvent(
             id: occurrenceID(of: event, start: start),
             title: event.title ?? String(localized: "(No Title)"),
@@ -170,6 +173,7 @@ final class CalendarStore {
             end: end,
             isAllDay: event.isAllDay,
             isDeclined: me?.participantStatus == .declined,
+            isAccepted: accepted,
             calendarID: calendar.calendarIdentifier,
             calendarName: calendar.title,
             calendarColor: color(of: calendar),

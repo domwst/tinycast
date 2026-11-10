@@ -16,6 +16,10 @@ camera preview, and individual events as searchable launcher entries.
 - **Auto join fires at most once per meeting per launch**, and only for a meeting starting at or
   after the moment the switch was armed. Both are why `AutoJoinPolicy` takes `armedAt` and the
   already-joined set rather than reading a clock of its own.
+- **Auto join opens only what you said yes to.** `MeetingEvent.isAccepted` is true for an event you
+  accepted, organized, or that has no attendees, and `AutoJoinPolicy` drops every other one before
+  the pick, so a stranger's invite added to your calendar never opens itself. Its confirmation
+  names the host the link opens, so a title can't pass for a call it isn't.
 - **The camera settles before the panel opens, and stops after it closes.**
   `CameraSession.start()` resolves access and blocks on `startRunning` first, then hands
   `CameraPreviewController` a settled `Feed` — so the panel's first frame is live video rather than a

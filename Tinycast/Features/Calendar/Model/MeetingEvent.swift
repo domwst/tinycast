@@ -9,6 +9,8 @@ struct MeetingEvent: Identifiable, Hashable, Sendable {
     let end: Date
     let isAllDay: Bool
     let isDeclined: Bool
+    /// Accepted, organized, or shared with nobody: an invite never answered is not joined unasked.
+    let isAccepted: Bool
     let calendarID: String
     let calendarName: String
     let calendarColor: CalendarColor?

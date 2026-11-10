@@ -86,13 +86,16 @@ final class ExtensionCoordinator {
     /// The link Copy Deeplink gives an extension row; extensions alone know their URL shape.
     func deepLink(forEntryID entryID: String, arguments: [String: String]) -> URL? {
         guard let ref = ExtensionCommandRef(entryID: entryID) else { return nil }
+        // A link is text anyone it reaches can read, so a typed password never travels in one.
+        let hidden = Set(
+            extensions.extensionNamed(ref.extensionName)?.command(named: ref.commandName)?.arguments
+                .filter(\.isPassword).map(\.name) ?? [])
         return ExtensionDeepLink.url(
-            extensionName: ref.extensionName, commandName: ref.commandName, arguments: arguments,
-            scheme: AppURLScheme.current)
+            extensionName: ref.extensionName, commandName: ref.commandName,
+            arguments: arguments.filter { !hidden.contains($0.key) }, scheme: AppURLScheme.current)
     }
 
-    /// A `raycast://extensions/…` link: the same command the launcher would run, by slug.
-    /// Every link reaching here came from outside; `query` is what a consent grant remembers.
+    /// A `raycast://extensions/…` link, always from outside; `query` is what a grant remembers.
     func runDeepLink(_ link: ExtensionDeepLink, query: String?) {
         guard settings.extensionsEnabled else {
             core.showMessage(

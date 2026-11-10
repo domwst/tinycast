@@ -10,9 +10,10 @@ struct AutoJoinPolicy: Sendable {
         from events: [MeetingEvent], now: Date, window: UpcomingWindow,
         joined: Set<MeetingEvent.ID>
     ) -> MeetingEvent? {
-        // Filtered before the pick, so a skipped link cannot shadow a call starting beside it.
-        let candidates =
-            namedProvidersOnly ? events.filter { $0.link?.provider != .generic } : events
+        // Filtered before the pick, so a skipped meeting cannot shadow a call starting beside it.
+        let candidates = events.filter { event in
+            event.isAccepted && (!namedProvidersOnly || event.link?.provider != .generic)
+        }
         guard let carded = window.carded(from: candidates, now: now) else { return nil }
         // Never early, never a meeting that was already under way, never the same one twice.
         guard carded.start >= armedAt, now >= carded.start, !joined.contains(carded.id) else {

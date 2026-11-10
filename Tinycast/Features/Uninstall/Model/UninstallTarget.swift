@@ -33,6 +33,8 @@ struct UninstallIdentity: Hashable, Sendable {
     let allowsBundleIDPrefixMatch: Bool
     /// Other installed apps' folded IDs, so one channel can't claim another's artifacts.
     let otherBundleIDs: Set<String>
+    /// Another installed copy carries the same ID, so what it names may be that one's data.
+    let sharesBundleID: Bool
     /// Case-folded names safe enough to claim a whole directory.
     let names: [String]
     let bundleURL: URL
@@ -62,6 +64,7 @@ struct UninstallIdentity: Hashable, Sendable {
         if target.bundleURL.standardizedFileURL == ownBundleURL.standardizedFileURL { return nil }
 
         let bundleID = target.bundleID.map(folded).flatMap { $0.isEmpty ? nil : $0 }
+        let others = Set(otherBundleIDs.map(folded))
         let names = safeNames(
             displayName: target.displayName, bundleName: target.bundleName,
             otherAppNames: otherAppNames)
@@ -70,7 +73,8 @@ struct UninstallIdentity: Hashable, Sendable {
         return UninstallIdentity(
             bundleID: bundleID,
             allowsBundleIDPrefixMatch: (bundleID?.split(separator: ".").count ?? 0) >= 3,
-            otherBundleIDs: Set(otherBundleIDs.map(folded)).subtracting([bundleID].compactMap { $0 }),
+            otherBundleIDs: others.subtracting([bundleID].compactMap { $0 }),
+            sharesBundleID: bundleID.map(others.contains) ?? false,
             names: names,
             bundleURL: target.bundleURL.standardizedFileURL)
     }

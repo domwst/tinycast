@@ -20,6 +20,9 @@ struct AIConnectionEditorPanel: View {
     @State private var modelQuery = ""
     @State private var discovery: ModelDiscoveryState = .waitingForKey
     @State private var discoveryRevision = 0
+    @FocusState private var baseURLFocused: Bool
+    /// A half-typed host is a real domain someone may own, so discovery waits until editing ends.
+    @State private var baseURLCommitted = true
     @State private var error: String?
 
     private let modelDiscovery = AIModelDiscoveryService()
@@ -77,6 +80,8 @@ struct AIConnectionEditorPanel: View {
                             prompt: Text(connection.provider.defaultBaseURL)
                         )
                         .settingsEditorTextField()
+                        .focused($baseURLFocused)
+                        .onSubmit(commitBaseURL)
                     }
                     editorField("API Key") {
                         RevealableSecureField(
@@ -149,7 +154,7 @@ struct AIConnectionEditorPanel: View {
         .settingsEditorPanelSurface()
         .task(id: discoveryRevision) {
             try? await Task.sleep(for: .milliseconds(450))
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, baseURLCommitted else { return }
             await discoverModels()
         }
         .onChange(of: key) { discoveryRevision += 1 }
@@ -157,7 +162,12 @@ struct AIConnectionEditorPanel: View {
         .onChange(of: connection.baseURL) {
             connection.dropDeclaredLevels()
             connection.outputLimits = nil
+            // A provider switch sets the URL with the field idle, which counts as done editing.
+            baseURLCommitted = !baseURLFocused
             discoveryRevision += 1
+        }
+        .onChange(of: baseURLFocused) { _, focused in
+            if !focused { commitBaseURL() }
         }
         .onChange(of: connection.provider) { oldProvider, newProvider in
             if connection.baseURL.isEmpty || connection.baseURL == oldProvider.defaultBaseURL {
@@ -167,6 +177,12 @@ struct AIConnectionEditorPanel: View {
             connection.outputLimits = nil
             discoveryRevision += 1
         }
+    }
+
+    private func commitBaseURL() {
+        guard !baseURLCommitted else { return }
+        baseURLCommitted = true
+        discoveryRevision += 1
     }
 
     private var headersSection: some View {

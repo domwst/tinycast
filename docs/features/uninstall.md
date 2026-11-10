@@ -10,6 +10,10 @@ any `.application` entry; it opens the `.uninstall` palette sub-screen scoped to
   the feature; `removeItem` must never appear here. That is what makes display-name attribution
   tolerable — a false positive costs a drag back, not the user's data — so a "delete permanently" option
   would have to drop name matching in the same commit.
+- **A shared bundle ID is never the default.** Any bundle can claim any ID, so when another installed
+  app carries the target's own, `UninstallIdentity.sharesBundleID` marks every row found by that ID
+  (and its group containers) `isShared`: labelled, and unchecked in `defaultSelection`. Only the
+  bundle itself and what it alone owns are preselected; the rest is an explicit choice.
 - **The deciding half stays Foundation-only and pure** for `uninstall-test`, with every environment fact
   injected: the scanner hands the rules directory **names**, never URLs, and hands the classifier a
   `PathFacts`.

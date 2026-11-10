@@ -343,6 +343,23 @@ struct UninstallTests {
                 target: anonymous, otherAppNames: [], ownBundleID: ownBundleID,
                 ownBundleURL: ownBundleURL) == nil,
             "no bundle ID and no safe name means nothing can be attributed")
+
+        let forged = UninstallTarget(
+            bundleURL: URL(fileURLWithPath: "/Users/me/Downloads/Weather.app"),
+            bundleID: "com.victim.notes", displayName: "Weather", bundleName: nil)
+        expect(
+            UninstallIdentity.make(
+                target: forged, otherAppNames: ["Notes Pro"], otherBundleIDs: ["com.victim.notes"],
+                ownBundleID: ownBundleID, ownBundleURL: ownBundleURL)?.sharesBundleID == true,
+            "a bundle claiming an installed app's ID is known to share it")
+        var sharedRow = candidate("/victim-data")
+        sharedRow.isShared = true
+        let plan = UninstallPlan(
+            target: forged, candidates: [candidate("/bundle", evidence: .bundle), sharedRow],
+            isTargetRunning: false)
+        expect(
+            plan.defaultSelection.checked == ["/bundle"],
+            "and what that ID names starts unchecked, so the other app's data is never the default")
     }
 
     // MARK: - Path safety

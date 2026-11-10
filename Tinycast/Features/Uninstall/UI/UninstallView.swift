@@ -99,7 +99,7 @@ private struct UninstallRow: View {
                 .foregroundStyle(Theme.Colors.textSecondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
-            if let label = candidate.evidence.label {
+            if let label = candidate.label {
                 Text(label)
                     .font(metrics.typography.rowTrailing)
                     .foregroundStyle(Theme.Colors.textTertiary)

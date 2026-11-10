@@ -375,7 +375,7 @@ final class CalendarCoordinator {
             guard
                 await core.confirm(
                     title: String(localized: "Join \(meeting.title)?"),
-                    message: UpcomingWindow.countdown(to: meeting.start, now: Date(), locale: .current),
+                    message: Self.joinMessage(meeting, link: link),
                     symbol: link.provider.sfSymbol, confirmTitle: String(localized: "Join"),
                     tone: .neutral, confirmRole: .standard,
                     dismissTitle: String(localized: "Not Now"))
@@ -388,6 +388,13 @@ final class CalendarCoordinator {
             title: String(localized: "Couldn't open the meeting link"),
             message: String(localized: "Nothing on this Mac would open \(link.url.absoluteString)."),
             symbol: "video.slash", recovery: nil)
+    }
+
+    /// Names where the link goes, so an invite's title can't pass for a call it isn't.
+    private static func joinMessage(_ meeting: MeetingEvent, link: MeetingLink) -> String {
+        let countdown = UpcomingWindow.countdown(to: meeting.start, now: Date(), locale: .current)
+        guard let host = link.url.host(percentEncoded: false) else { return countdown }
+        return countdown + "\n" + String(localized: "Opens \(host)")
     }
 
     func copyLink(_ meeting: MeetingEvent) {

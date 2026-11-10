@@ -26,8 +26,14 @@ struct UninstallCandidate: Identifiable, Hashable, Sendable {
     /// Nil until a directory's walk lands; a file's size comes straight from its `lstat`.
     var size: MeasuredSize?
     let protection: UninstallProtection
+    /// Found by a bundle ID another installed app also claims; any bundle can claim any ID.
+    var isShared = false
 
     var id: String { path }
+
+    var label: String? {
+        isShared ? String(localized: "another app has this ID") : evidence.label
+    }
     var url: URL { URL(fileURLWithPath: path) }
     var isLocked: Bool { !protection.isRemovable }
     var lockReason: String? { protection.lockReason }
@@ -47,9 +53,10 @@ struct UninstallPlan: Equatable, Sendable {
 
     var totalBytes: Int64 { candidates.reduce(0) { $0 + ($1.size?.bytes ?? 0) } }
 
-    /// Everything removable, name matches included: exact, confined, and undoable.
+    /// Everything removable, name matches included, except what another app's ID also names.
     var defaultSelection: UninstallSelection {
-        UninstallSelection(plan: self, checked: removableIDs)
+        UninstallSelection(
+            plan: self, checked: Set(candidates.lazy.filter { !$0.isShared }.map(\.id)))
     }
 
     /// How a walk lands on the row it measured, without disturbing the order or the checked set.

@@ -68,10 +68,7 @@ private struct ArgumentField: View {
     let onSubmit: () -> Void
 
     var body: some View {
-        TextField(
-            "", text: $text,
-            prompt: Text(argument.placeholder).foregroundStyle(Theme.Colors.textTertiary)
-        )
+        field
         .textFieldStyle(.plain)
         .font(metrics.typography.rowTrailing)
         .tint(.white)
@@ -92,6 +89,16 @@ private struct ArgumentField: View {
         .help(
             argument.required
                 ? String(localized: "\(argument.placeholder) — required") : argument.placeholder)
+    }
+
+    @ViewBuilder
+    private var field: some View {
+        let prompt = Text(argument.placeholder).foregroundStyle(Theme.Colors.textTertiary)
+        if argument.isPassword {
+            SecureField("", text: $text, prompt: prompt)
+        } else {
+            TextField("", text: $text, prompt: prompt)
+        }
     }
 
     private var stroke: Color {

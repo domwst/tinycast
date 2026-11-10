@@ -132,6 +132,9 @@ struct ExtensionCommandArgument: Sendable, Hashable {
     let placeholder: String
     let required: Bool
 
+    /// Raycast's `password` argument: typed out of sight and never copied into a link.
+    var isPassword: Bool { type == "password" }
+
     init?(json: Any) {
         guard let dict = json as? [String: Any], let name = dict["name"] as? String else { return nil }
         self.name = name

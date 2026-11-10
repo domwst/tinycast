@@ -526,6 +526,11 @@ struct CalendarTests {
                 from: [event(id: "linkless", start: 60, link: nil)], now: start,
                 window: window, joined: []) == nil,
             "a meeting with no link is never auto joined")
+        let stranger = event(id: "stranger", start: 60, isAccepted: false)
+        expect(
+            policy.meeting(from: [stranger, meeting], now: start, window: window, joined: [])?.id
+                == "standup",
+            "an invite never answered is never auto joined, and never shadows one that was")
     }
 
     static func autoJoinRespectsArming() {
@@ -745,13 +750,14 @@ struct CalendarTests {
 
     static func event(
         id: String, start minutes: Int, minutes duration: Int = 30, isAllDay: Bool = false,
-        isDeclined: Bool = false, link: MeetingLink? = MeetingLink.detect(in: "https://example.com/x")
+        isDeclined: Bool = false, isAccepted: Bool = true,
+        link: MeetingLink? = MeetingLink.detect(in: "https://example.com/x")
     ) -> MeetingEvent {
         MeetingEvent(
             id: id, title: id, start: at(minutes),
             end: at(minutes).addingTimeInterval(TimeInterval(duration * 60)),
-            isAllDay: isAllDay, isDeclined: isDeclined, calendarID: "cal", calendarName: "Work",
-            calendarColor: nil, calendarItemID: id, link: link)
+            isAllDay: isAllDay, isDeclined: isDeclined, isAccepted: isAccepted, calendarID: "cal",
+            calendarName: "Work", calendarColor: nil, calendarItemID: id, link: link)
     }
 
     static func event(
@@ -761,8 +767,8 @@ struct CalendarTests {
         MeetingEvent(
             id: id, title: id, start: start,
             end: start.addingTimeInterval(TimeInterval(duration * 60)),
-            isAllDay: false, isDeclined: false, calendarID: "cal", calendarName: "Work",
-            calendarColor: nil, calendarItemID: id, link: link)
+            isAllDay: false, isDeclined: false, isAccepted: true, calendarID: "cal",
+            calendarName: "Work", calendarColor: nil, calendarItemID: id, link: link)
     }
 
     static func expect(_ condition: Bool, _ label: String) {
