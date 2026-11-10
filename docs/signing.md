@@ -64,9 +64,13 @@ security import /tmp/tc.p12 -k "$KC" -P tinycast -T /usr/bin/codesign
 rm -f /tmp/tc-key.pem /tmp/tc-cert.pem /tmp/tc.p12
 
 security find-identity -p codesigning "$KC"     # lists "Tinycast Self-Signed"
+
+# create-keychain also added it to the search list; take it off, so only its path reaches it.
+security list-keychains -d user -s $(security list-keychains -d user | grep -v tinycast-signing | tr -d '"')
 ```
 
-It stays off the keychain search list, so nothing finds it unless asked for it by path.
+Off the search list, Xcode and plain `codesign -s` never pick it up; the Nix module names it by
+path. Locked, it signs nothing without its password either way.
 
 ## 2. The release secrets
 
