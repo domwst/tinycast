@@ -66,7 +66,10 @@ rm -f /tmp/tc-key.pem /tmp/tc-cert.pem /tmp/tc.p12
 security find-identity -p codesigning "$KC"     # lists "Tinycast Self-Signed"
 
 # create-keychain also added it to the search list; take it off, so only its path reaches it.
-security list-keychains -d user -s $(security list-keychains -d user | grep -v tinycast-signing | tr -d '"')
+# The sed strips each line's indent and quotes, so fish, zsh and bash all pass clean paths.
+security list-keychains -d user -s $(security list-keychains -d user | grep -v tinycast-signing \
+  | sed -e 's/^ *"//' -e 's/"$//')
+security list-keychains -d user                  # your login keychain, and no tinycast-signing
 ```
 
 Off the search list, Xcode and plain `codesign -s` never pick it up; the Nix module names it by
