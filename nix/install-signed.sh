@@ -6,9 +6,9 @@ usage="usage: install-signed.sh <store Tinycast.app> <user> <identity> <keychain
 src="${1:?$usage}" user="${2:?$usage}" identity="${3:?$usage}" keychain="${4?$usage}"
 dest="${5:-/Applications/Tinycast.app}"
 
-if [[ "$keychain" == "~/"* ]]; then
+if [ -n "$keychain" ] && [[ "$keychain" != /* ]]; then
   home="$(/usr/bin/dscl . -read "/Users/$user" NFSHomeDirectory | /usr/bin/sed 's/^NFSHomeDirectory: //')"
-  keychain="$home/${keychain#\~/}"
+  keychain="$home/$keychain"
 fi
 stamp="$dest/../.tinycast-installed-from"
 

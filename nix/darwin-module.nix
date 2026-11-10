@@ -8,6 +8,9 @@
 
 let
   cfg = config.programs.tinycast;
+  # Relative to the user's home, resolved at activation: a literal `~` fails nix-darwin's shellcheck.
+  keychain =
+    if cfg.signing.keychain == null then "" else lib.removePrefix "~/" cfg.signing.keychain;
 in
 {
   options.programs.tinycast = {
@@ -33,9 +36,10 @@ in
               type = lib.types.nullOr lib.types.str;
               default = "~/Library/Keychains/tinycast-signing.keychain-db";
               description = ''
-                Keychain holding the identity; a leading `~/` is `system.primaryUser`'s home. A
-                dedicated one that locks itself keeps other processes from signing an impostor
-                between updates, and it is unlocked on install. Null searches the user's keychains.
+                Keychain holding the identity. `~/`, or any relative path, starts at
+                `system.primaryUser`'s home. A dedicated one that locks itself keeps other processes
+                from signing an impostor between updates, and it is unlocked on install. Null
+                searches the user's keychains.
               '';
             };
           };
@@ -60,7 +64,7 @@ in
         ${lib.escapeShellArg "${cfg.package}/Applications/Tinycast.app"} \
         ${lib.escapeShellArg config.system.primaryUser} \
         ${lib.escapeShellArg cfg.signing.identity} \
-        ${lib.escapeShellArg (if cfg.signing.keychain == null then "" else cfg.signing.keychain)} \
+        ${lib.escapeShellArg keychain} \
         || echo "warning: Tinycast was not installed or updated; see docs/signing.md in its repo" >&2
     '';
   };
