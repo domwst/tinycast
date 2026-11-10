@@ -437,6 +437,12 @@ struct RootPaletteView: View {
                 if vm.mode == .launcher { core.fileSearchCoordinator.searchFromLauncher(vm.query) }
                 if vm.mode == .dictionary { dictionary.lookUp(vm.query) }
                 if vm.mode == .menuSearch { menuSearch.filter(vm.query) }
+                if vm.mode == .launcher || vm.mode == .calculatorHistory,
+                    CalcMemo.evaluate(vm.query, rates: currencyRates.rates, format: core.calcNumberFormat)?
+                        .isCurrency == true
+                {
+                    currencyRates.requestRates()
+                }
                 if vm.mode == .switchWindows { windowSwitch.filter(vm.query) }
                 // A command that took over the search text filters its own list.
                 if vm.mode == .extensionCommand, let handler = extensionScreen.searchTextHandler {

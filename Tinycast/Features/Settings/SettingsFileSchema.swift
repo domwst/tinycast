@@ -27,12 +27,21 @@ enum SettingsFileSchema {
             SettingsFileBinding(key, root, path, accept: accept)
         }
 
+        /// A capability or a guard an edit may only move toward `safe`; the other way is refused.
+        func saferOnly(
+            _ path: ReferenceWritableKeyPath<AppSettings, Bool>, safe: Bool
+        ) -> SettingsFileBinding {
+            bind(settings, path) { [settings] new in
+                new == safe || settings[keyPath: path] != safe ? new : nil
+            }
+        }
+
         switch key {
         case .launcherShortcut:
             return shortcuts.binding(
                 for: key, action: .togglePalette, name: String(localized: "App Launcher"))
         case .showInMenuBar: return bind(settings, \.showInMenuBar)
-        case .automaticallyCheckForUpdates: return bind(settings, \.automaticallyCheckForUpdates)
+        case .automaticallyCheckForUpdates: return saferOnly(\.automaticallyCheckForUpdates, safe: false)
         case .popToRootTimeout: return bind(settings, \.popToRootTimeout)
         case .escapeKeyBehavior: return bind(settings, \.escapeKeyBehavior)
         case .autoSwitchInputSource: return bind(settings, \.autoSwitchInputSourceID)
@@ -141,7 +150,7 @@ enum SettingsFileSchema {
         case .windowRooms: return windowManagement.roomsBinding(for: key)
         case .windowManagementCommands:
             return launcher.commandsBinding(for: key, owner: .windowManagement)
-        case .clipboardEnabled: return bind(settings, \.clipboardEnabled)
+        case .clipboardEnabled: return saferOnly(\.clipboardEnabled, safe: false)
         case .clipboardRetention: return bind(settings, \.clipboardRetention)
         case .clipboardDefaultAction: return bind(settings, \.clipboardDefaultAction)
         case .clipboardDisabledApps: return bind(settings, \.clipboardDisabledApps)
@@ -153,8 +162,8 @@ enum SettingsFileSchema {
         case .calendarLauncherLimit: return bind(settings, \.calendarLauncherLimit)
         case .calendarSpan: return bind(settings, \.calendarSpan)
         case .joinWindowMinutes: return bind(settings, \.joinWindowMinutes)
-        case .autoJoinConfirms: return bind(settings, \.autoJoinConfirms)
-        case .autoJoinNamedProvidersOnly: return bind(settings, \.autoJoinNamedProvidersOnly)
+        case .autoJoinConfirms: return saferOnly(\.autoJoinConfirms, safe: true)
+        case .autoJoinNamedProvidersOnly: return saferOnly(\.autoJoinNamedProvidersOnly, safe: true)
         case .meetingBrowser: return bind(settings, \.meetingBrowserBundleID)
         case .calendarMenuBarDisplay: return bind(settings, \.calendarMenuBarDisplay)
         case .menuBarEvents: return bind(settings, \.menuBarEvents)

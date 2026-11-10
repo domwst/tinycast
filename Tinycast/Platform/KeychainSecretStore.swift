@@ -41,19 +41,11 @@ struct KeychainSecretStore: Sendable {
         return true
     }
 
+    /// Replaced, never updated: an update keeps the access list of whoever made the item first.
     func setSecret(_ secret: String, for account: UUID) throws {
-        guard let data = secret.data(using: .utf8) else { throw StoreError.invalidEncoding }
-        let lookup = query(for: account, returningData: false)
-        let update = [kSecValueData as String: data]
-        let status = SecItemUpdate(lookup as CFDictionary, update as CFDictionary)
-        if status == errSecItemNotFound {
-            var addition = lookup
-            addition[kSecValueData as String] = data
-            let addStatus = SecItemAdd(addition as CFDictionary, nil)
-            guard addStatus == errSecSuccess else { throw StoreError.keychain(addStatus) }
-        } else if status != errSecSuccess {
-            throw StoreError.keychain(status)
-        }
+        guard secret.data(using: .utf8) != nil else { throw StoreError.invalidEncoding }
+        try removeSecret(for: account)
+        try addSecret(secret, for: account)
     }
 
     /// Add-only: an item already there, perhaps planted, is refused rather than overwritten.

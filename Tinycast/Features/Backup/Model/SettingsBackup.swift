@@ -320,7 +320,8 @@ extension SettingsBackup {
     private func applySettings(_ s: SettingsData, to core: AppCore) -> Int {
         let settings = core.settings
         var count = 0
-        if let flag = s.clipboardEnabled {
+        // Turning capture on would record every copy unasked, so an import may only turn it off.
+        if let flag = s.clipboardEnabled, !flag || settings.clipboardEnabled {
             settings.clipboardEnabled = flag
             count += 1
         }
@@ -369,7 +370,10 @@ extension SettingsBackup {
             settings.showInMenuBar = show
             count += 1
         }
-        if let automaticallyCheck = s.automaticallyCheckForUpdates {
+        // Checking goes online, so an import may stop it but never start it.
+        if let automaticallyCheck = s.automaticallyCheckForUpdates,
+            !automaticallyCheck || settings.automaticallyCheckForUpdates
+        {
             settings.automaticallyCheckForUpdates = automaticallyCheck
             count += 1
         }
@@ -568,11 +572,12 @@ extension SettingsBackup {
             settings.joinWindowMinutes = window
             count += 1
         }
-        if let flag = s.autoJoinConfirms {
+        // An import may raise either guard on unattended joins, never lower one.
+        if let flag = s.autoJoinConfirms, flag || !settings.autoJoinConfirms {
             settings.autoJoinConfirms = flag
             count += 1
         }
-        if let flag = s.autoJoinNamedProvidersOnly {
+        if let flag = s.autoJoinNamedProvidersOnly, flag || !settings.autoJoinNamedProvidersOnly {
             settings.autoJoinNamedProvidersOnly = flag
             count += 1
         }

@@ -7,6 +7,7 @@ excluded:
   - Tinycast/DesignSystem/Scrolling/ThinScrollbar.swift
   - Tinycast/Features/Emoji/Model/EmojiData.generated.swift
   - Tinycast/Features/Calculator/Model/CurrencyData.generated.swift
+  - Tinycast/Features/Dictation/Model/DictationModelFiles.generated.swift
 
 disabled_rules:
   - todo                                      # tracked in issues, not by the linter

@@ -17,7 +17,8 @@ enum CalcQuantity {
         var parser = CalcExpressionParser(tokens: split.expressionTokens, rates: rates)
         guard let value = parser.parse() else {
             guard let message = parser.issue else { return nil }
-            return CalcResult(expression: query, payload: .error(message: message))
+            return CalcResult(
+                expression: query, payload: .error(message: message), isCurrency: parser.usedCurrency)
         }
         if parser.dimensionCount == 0, !value.isBoolean {
             guard split.targetName == nil,
@@ -38,12 +39,7 @@ enum CalcQuantity {
         }
 
         if parser.usedCurrency && !parser.usedCurrencyRate {
-            guard let rates else {
-                return CalcResult(
-                    expression: query,
-                    payload: .error(
-                        message: String(localized: "Exchange rates unavailable — check your connection.")))
-            }
+            guard let rates else { return .ratesUnavailable(query) }
             if let code = parser.currencyCodes.first(where: { rates.rate(for: $0) == nil }) {
                 return CalcResult(
                     expression: query,
@@ -77,7 +73,8 @@ enum CalcQuantity {
             }
             guard let output = parser.converted(value, to: targetName) else {
                 guard let message = parser.issue else { return nil }
-                return CalcResult(expression: query, payload: .error(message: message))
+                return CalcResult(
+                    expression: query, payload: .error(message: message), isCurrency: parser.usedCurrency)
             }
             return convertedResult(output, expression: expressionText(split.expressionTokens))
         }

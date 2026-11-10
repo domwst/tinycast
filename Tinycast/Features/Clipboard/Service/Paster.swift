@@ -11,6 +11,9 @@ enum Paster {
     /// Shorter: no activation to wait on, only the pasteboard write reaching the target's process.
     private static let directPostDelay: TimeInterval = 0.05
 
+    /// How long a slow app may take to come forward before the paste is dropped, not misplaced.
+    private static let activationLimit: TimeInterval = 0.5
+
     /// Write the item and paste it into `previousApp`, activating it so ⌘V lands there.
     @MainActor @discardableResult
     static func paste(
@@ -18,10 +21,7 @@ enum Paster {
     ) -> Bool {
         guard write(item, store: store) else { return false }
         store.promote(item)
-        previousApp?.activate()
-        DispatchQueue.main.asyncAfter(deadline: .now() + activationDelay) {
-            postCommandV()
-        }
+        activateAndPaste(into: previousApp)
         return true
     }
 
@@ -58,20 +58,14 @@ enum Paster {
     @MainActor
     static func pasteString(_ text: String, previousApp: NSRunningApplication?) {
         writeString(text)
-        previousApp?.activate()
-        DispatchQueue.main.asyncAfter(deadline: .now() + activationDelay) {
-            postCommandV()
-        }
+        activateAndPaste(into: previousApp)
     }
 
     @MainActor
     static func pasteFile(_ url: URL, previousApp: NSRunningApplication?) {
         ClipboardExports.discardPasteboardCopies()
         PasteboardFiles.write(url, to: .general)
-        previousApp?.activate()
-        DispatchQueue.main.asyncAfter(deadline: .now() + activationDelay) {
-            postCommandV()
-        }
+        activateAndPaste(into: previousApp)
     }
 
     @MainActor
@@ -84,8 +78,34 @@ enum Paster {
     static func pasteStringInPlace(_ text: String, into app: NSRunningApplication?) {
         writeString(text)
         guard let pid = app?.processIdentifier else { return }
+        let generation = NSPasteboard.general.changeCount
         DispatchQueue.main.asyncAfter(deadline: .now() + directPostDelay) {
+            guard NSPasteboard.general.changeCount == generation else { return }
             postCommandV(toPid: pid)
+        }
+    }
+
+    /// ⌘V goes to the HID tap, so it lands wherever focus is; it waits for `app` or is dropped.
+    @MainActor
+    private static func activateAndPaste(into app: NSRunningApplication?) {
+        let generation = NSPasteboard.general.changeCount
+        app?.activate()
+        let deadline = Date().addingTimeInterval(activationLimit)
+        DispatchQueue.main.asyncAfter(deadline: .now() + activationDelay) {
+            postCommandV(into: app?.processIdentifier, generation: generation, until: deadline)
+        }
+    }
+
+    @MainActor
+    private static func postCommandV(into pid: pid_t?, generation: Int, until deadline: Date) {
+        // Another copy in the wait means what would land is no longer what was chosen.
+        guard NSPasteboard.general.changeCount == generation else { return }
+        guard let pid, NSWorkspace.shared.frontmostApplication?.processIdentifier != pid else {
+            return postCommandV()
+        }
+        guard Date() < deadline else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) {
+            postCommandV(into: pid, generation: generation, until: deadline)
         }
     }
 
@@ -106,7 +126,9 @@ enum Paster {
     ) -> Bool {
         guard write(item, store: store) else { return false }
         if let pid = app?.processIdentifier {
+            let generation = NSPasteboard.general.changeCount
             DispatchQueue.main.asyncAfter(deadline: .now() + directPostDelay) {
+                guard NSPasteboard.general.changeCount == generation else { return }
                 postCommandV(toPid: pid)
             }
         }

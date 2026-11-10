@@ -191,6 +191,14 @@ struct FileSearchTests {
                 shipped.excludes(name: URL(filePath: path).lastPathComponent, path: path),
                 "\(path) is skipped")
         }
+        for path in ["/Users/test/Library/Messages", "/Users/test/Library/Safari"] {
+            expect(
+                shipped.excludes(name: URL(filePath: path).lastPathComponent, path: path),
+                "\(path) is skipped, so the index never lists what Full Disk Access guards")
+        }
+        expect(
+            !shipped.excludes(name: "Messages", path: "/Users/test/Documents/Messages"),
+            "a folder sharing a protected name elsewhere is indexed")
         expect(
             !shipped.excludes(name: "Caches", path: "/Users/test/Developer/Caches"),
             "a caches folder elsewhere is indexed")

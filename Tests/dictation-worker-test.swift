@@ -13,7 +13,8 @@ struct DictationWorkerTest {
                 try await DictationModelDownloader.download(
                     .redux,
                     destination: URL(fileURLWithPath: CommandLine.arguments.last!),
-                    baseURL: URL(string: "https://dictation.test/")!, protocolClasses: [DownloadFixture.self])
+                    baseURL: URL(string: "https://dictation.test/")!, files: DownloadFixture.files(for: .redux),
+                    protocolClasses: [DownloadFixture.self])
                 fatalError("Another process acquired the same download root")
             } catch DictationWire.Failure.busy { return }
         }
@@ -125,7 +126,8 @@ struct DictationWorkerTest {
         let cancelled = Task.detached {
             try await DictationModelDownloader.download(
                 .redux, destination: destination,
-                baseURL: base, protocolClasses: [DownloadFixture.self]
+                baseURL: base, files: DownloadFixture.files(for: .redux),
+                protocolClasses: [DownloadFixture.self]
             ) { received, total in
                 guard received > 0 else { return }
                 guard received == 1024,
@@ -141,7 +143,8 @@ struct DictationWorkerTest {
             try await DictationModelDownloader.download(
                 .qwenSmall,
                 destination: root.appending(path: DictationModel.qwenSmall.folderName),
-                baseURL: base, protocolClasses: [DownloadFixture.self])
+                baseURL: base, files: DownloadFixture.files(for: .qwenSmall),
+                protocolClasses: [DownloadFixture.self])
             fatalError("Concurrent download acquired the same root")
         } catch DictationWire.Failure.busy {}
         let competitor = Process()
@@ -159,7 +162,7 @@ struct DictationWorkerTest {
         let other = root.appending(path: "other-channel/\(DictationModel.redux.folderName)")
         try await DictationModelDownloader.download(
             .redux, destination: other,
-            baseURL: base, protocolClasses: [DownloadFixture.self])
+            baseURL: base, files: DownloadFixture.files(for: .redux), protocolClasses: [DownloadFixture.self])
         guard manager.fileExists(atPath: other.path) else {
             fatalError("An independent download root was blocked")
         }
@@ -177,7 +180,8 @@ struct DictationWorkerTest {
             events.withLock { $0.removeAll() }
             try await DictationModelDownloader.download(
                 model, destination: root.appending(path: model.folderName),
-                baseURL: base, protocolClasses: [DownloadFixture.self]
+                baseURL: base, files: DownloadFixture.files(for: model),
+                protocolClasses: [DownloadFixture.self]
             ) { received, total in
                 events.withLock { $0.append((received, total)) }
             }
@@ -195,7 +199,8 @@ struct DictationWorkerTest {
         do {
             try await DictationModelDownloader.download(
                 .redux, destination: root.appending(path: "corrupt"),
-                baseURL: base, protocolClasses: [DownloadFixture.self])
+                baseURL: base, files: DownloadFixture.files(for: .redux),
+                protocolClasses: [DownloadFixture.self])
             fatalError("Invalid checksum installed a model")
         } catch let error as URLError where error.code == .badServerResponse {}
         let expectedNames = (preserved + models.map(\.folderName)).sorted()
@@ -235,30 +240,28 @@ private final class DownloadFixture: URLProtocol, @unchecked Sendable {
     override static func canInit(with request: URLRequest) -> Bool { request.url?.host == "dictation.test" }
     override static func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
+    /// One file per required component, each `content`, in place of the build's pinned list.
+    static func files(for model: DictationModel) -> [DictationModelFiles.File] {
+        let checksum = SHA256.hash(data: content).map { String(format: "%02x", $0) }.joined()
+        return model.requiredFiles.sorted().map { name in
+            DictationModelFiles.File(
+                repository: model.repository, revision: model.revision,
+                path: name.hasSuffix(".mlmodelc") ? name + "/weights.bin" : name,
+                size: Int64(content.count), sha256: checksum)
+        }
+    }
+
     override func startLoading() {
         guard let url = request.url else { return }
         let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        if url.path.contains("/tree/") {
-            let checksum = SHA256.hash(data: Self.content).map { String(format: "%02x", $0) }.joined()
-            let files = [DictationModel.redux, .qwenSmall].reduce(into: Set<String>()) {
-                $0.formUnion($1.requiredFiles)
-            }.sorted().map { name in
-                [
-                    "path": name.hasSuffix(".mlmodelc") ? name + "/weights.bin" : name,
-                    "type": "file", "size": Self.content.count, "lfs": ["oid": checksum]
-                ] as [String: Any]
-            }
-            guard let data = try? JSONSerialization.data(withJSONObject: files) else {
-                fatalError("Invalid download fixture manifest")
-            }
-            client?.urlProtocol(self, didLoad: data)
-        } else {
-            let state = Self.state.withLock { $0 }
-            let data = state.corrupt ? Data(repeating: 66, count: Self.content.count) : Self.content
-            client?.urlProtocol(self, didLoad: state.hold ? data.prefix(1024) : data)
-            if state.hold { return }
+        guard !url.path.contains("/tree/") else {
+            fatalError("The downloader asked the host what a model holds instead of using its pinned list")
         }
+        let state = Self.state.withLock { $0 }
+        let data = state.corrupt ? Data(repeating: 66, count: Self.content.count) : Self.content
+        client?.urlProtocol(self, didLoad: state.hold ? data.prefix(1024) : data)
+        if state.hold { return }
         client?.urlProtocolDidFinishLoading(self)
     }
 

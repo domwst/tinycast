@@ -388,6 +388,15 @@ struct CustomCommandTests {
         check("a streamed run reports what it printed", simple.log.contains("captured"))
         check("a streamed run reports a clean exit", simple.result?.succeeded == true)
 
+        // A descriptor left open, as a Foundation `Pipe` is, must never reach the command.
+        var leak: [Int32] = [0, 0]
+        _ = pipe(&leak)
+        let inherited = await collect(
+            ShellCommandRunner.stream("test -e /dev/fd/\(leak[1]) && echo leaked || echo closed"))
+        check("a command never inherits Tinycast's other descriptors", inherited.log.contains("closed"))
+        close(leak[0])
+        close(leak[1])
+
         // The reported bug: brew writes `==>` to stderr, which must not reorder.
         let ordered = await collect(
             ShellCommandRunner.stream("printf 'one\\n'; printf 'two\\n' >&2; printf 'three\\n'"))

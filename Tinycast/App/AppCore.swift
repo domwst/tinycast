@@ -356,7 +356,6 @@ final class AppCore {
             calendarCoordinator.applyEnabled()
             Task { await appIndex.refresh() }
             Task { await emojiIndex.load(languages: SystemLanguages.preferred) }
-            currencyRates.start()
             let launched = Date()
             Task.detached(priority: .utility) {
                 BackupStaging.sweepOrphans(before: launched)

@@ -9,6 +9,14 @@ struct FileSearchIgnoreList: Sendable, Equatable {
         ".venv", "*.photoslibrary", "~/.Trash", "~/.cache", "~/.npm", "~/Library/Application Support",
         "~/Library/Caches", "~/Library/Containers", "~/Library/Developer", "~/Library/Group Containers",
         "~/Library/Mail", "/Library/Caches", "/private/var/folders"
+    ] + privacyProtected
+
+    /// What macOS keeps from apps without Full Disk Access; the index must not hand its names out.
+    static let privacyProtected = [
+        "~/Library/Messages", "~/Library/Safari", "~/Library/Calendars", "~/Library/Reminders",
+        "~/Library/Cookies", "~/Library/HomeKit", "~/Library/IdentityServices", "~/Library/Metadata",
+        "~/Library/Suggestions", "~/Library/Biome", "~/Library/Accounts", "~/Library/Daemon Containers",
+        "~/Library/Sharing", "~/Library/PersonalizationPortrait", "~/Library/Autosave Information"
     ]
 
     /// A shipped rule is governed by `removedDefaults` alone, even when `added` repeats it.

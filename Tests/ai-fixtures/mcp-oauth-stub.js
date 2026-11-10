@@ -10,7 +10,12 @@ const clientAuth = [];
 const issued = { access_token: 'fixture-access', token_type: 'Bearer', refresh_token: 'rotated-refresh', expires_in: 3600 };
 const server = http.createServer(async (req, res) => {
   let raw = '';
-  for await (const chunk of req) raw += chunk;
+  // A client that closes mid-request, as a stopped transport does, must not take the server down.
+  try {
+    for await (const chunk of req) raw += chunk;
+  } catch {
+    return;
+  }
   const send = (status, body, headers = {}) => {
     res.writeHead(status, { 'Content-Type': 'application/json', ...headers });
     res.end(JSON.stringify(body));

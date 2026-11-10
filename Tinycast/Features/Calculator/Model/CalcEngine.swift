@@ -67,6 +67,14 @@ struct CalcResult: Equatable, Sendable {
             canChain: canChain, isCurrency: isCurrency)
     }
 
+    /// Marked as currency, so asking for one is what starts the first fetch of the rates.
+    static func ratesUnavailable(_ query: String) -> CalcResult {
+        CalcResult(
+            expression: query,
+            payload: .error(message: String(localized: "Exchange rates unavailable — check your connection.")),
+            isCurrency: true)
+    }
+
     /// True only for a copyable value; an error card has no primary action and no actions menu.
     var isActionable: Bool {
         if case .value = payload { return true }
@@ -187,10 +195,7 @@ enum CalcEngine {
                     expression: query,
                     payload: .error(message: String(localized: "No exchange rate for \(code).")))
             case .unavailable:
-                return CalcResult(
-                    expression: query,
-                    payload: .error(
-                        message: String(localized: "Exchange rates unavailable — check your connection.")))
+                return .ratesUnavailable(query)
             }
         }
 

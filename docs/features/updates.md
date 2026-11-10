@@ -21,14 +21,21 @@ uninstall` and `brew list` keep working unchanged.
 - **A downloaded update is never quarantined.** macOS sets that flag for sandboxed downloaders and
   for apps that opt in with `LSFileQuarantineEnabled`, and Tinycast is neither. `Quarantine` checks
   anyway, and an app that still carries the flag is refused rather than installed.
-- **Two independent trust roots, either of which may change alone.** A downloaded bundle is trusted
-  when its seal passes strict validation, nested helpers included, _and_ either its zip carries a
-  valid Ed25519 signature from the release key in `TinycastUpdatePublicKey` and the bundle is
-  Developer ID signed by any team, or it satisfies the running copy's own designated requirement.
-  Nothing is pinned: a new Apple team still updates through the key, and a new key through an
-  unchanged identity. Changing both in one release strands everyone. `notarized` is deliberately not
-  checked — it resolves the ticket through `syspolicyd` or the network, so an offline Mac would
-  refuse a bundle the signature already proves is ours.
+- **The running copy's identity always decides.** A downloaded bundle is trusted only when its seal
+  passes strict validation, nested helpers included, _and_ it satisfies the designated requirement
+  of the copy that is running, read once before the download as `Staged.requirement`. A release key
+  signature, when the feed lists one, must verify too; one that fails to download is no verdict.
+  This fork dropped "Developer ID from any team": with it, a same-user process that planted an app in
+  the staging folder needed only some Developer ID. A new Apple team therefore means installing by
+  hand once. `notarized` is deliberately not checked: it resolves the ticket through `syspolicyd` or
+  the network, so an offline Mac would refuse a bundle the signature already proves is ours.
+- **The staging folder is new every time.** `expand` creates `expanded-<UUID>` itself, mode 0700,
+  and fails if it exists, and the archive must hold exactly one entry, a `.app`. A folder planted in
+  advance is never used, and nothing beside the bundle is ever chosen instead of it.
+- **Downloads are bounded.** The zip stops at the release's own size, or 1 GiB when the feed gives
+  none, and the `.sig` at 64 KiB.
+- **This fork updates from its own releases.** `ReleaseFeed.repository` is `domwst/tinycast`, so an
+  upstream build is never offered: it would store clipboard history in plaintext again.
 - **A build only ever updates within its own channel.** The channels are separate bundle ids installed
   side by side; crossing would mean installing a different app. `com.tinycast.app.dev` never updates
   at all, and does not advertise the command.
@@ -109,7 +116,9 @@ measured from `lastCheckedAt`, so relaunching never re-asks GitHub; the interval
 2 h after a failed attempt, and the first check waits 30 s so it never lands in the login rush. The
 request carries a `User-Agent`, which the GitHub API rejects requests without.
 
-Disabling automatic checks takes effect immediately and survives relaunch. Turning them back on
+Automatic checks are off until turned on in Settings, since nothing goes online before the user asks;
+a copy that already stored the choice keeps it. Disabling automatic checks takes effect immediately
+and survives relaunch. Turning them back on
 resumes the same schedule, with the startup delay and cached check time respected. Check for Updates
 always works independently of this preference, including while automatic checking is disabled.
 
@@ -127,15 +136,16 @@ One route, whatever the install came from:
 
 1. Stream the zip into `~/Library/Caches/<bundle-id>/Updates/`, with real byte progress and a Cancel
    that actually aborts the transfer, then fetch its `.sig` and check it against the release key.
-2. `ditto -x -k` it into a staging folder, and take whatever `.app` lands there — the bundle is named
-   for its channel, so it is `Tinycast Beta.app` on beta.
+2. `ditto -x -k` it into a fresh staging folder, and require exactly one entry there, a `.app` — the
+   bundle is named for its channel, so it is `Tinycast Beta.app` on beta.
 3. Check quarantine natively; clear it if somehow present, and refuse the update if it survives.
-4. Verify the bundle id, the version, and that the code signature is valid and proves the bundle is
-   ours — through the release key, or through the running copy's own designated requirement — and
-   record its code-directory hash. A `.sig` that fails to download is logged and treated as absent.
+4. Verify that the code signature is valid and satisfies the running copy's own designated
+   requirement, then the bundle id and the version, and record its code-directory hash. A `.sig`
+   that fails to download is logged and treated as absent; one that downloads must verify.
 5. Offer Relaunch. At quit, by Relaunch or otherwise, the staged bundle is checked again against
    that hash, so a copy changed since staging is discarded, and `FileManager.replaceItemAt` swaps
-   it in. The staging folder is on the same volume as `/Applications`, which is what lets this be
+   it in, keeping the old copy until the bundle now in place passes the same check, and putting the
+   old copy back if it does not. The staging folder is on the same volume as `/Applications`, which is what lets this be
    atomic. A copy Tinycast cannot write is reported before the download starts, not worked around;
    there is no privileged helper.
 6. Relaunch spawns a detached waiter that reopens the app once this process exits — `open` on a

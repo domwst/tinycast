@@ -121224,6 +121224,58 @@
         }
       }
     },
+    "The download is larger than this release said it would be." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Download ist größer, als diese Version angegeben hat."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La descarga es más grande de lo que indicaba esta versión."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Le téléchargement est plus volumineux que ce qu’annonçait cette version."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ダウンロードのサイズが、このリリースで示されたサイズを超えています。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다운로드 크기가 이 릴리스에서 알린 크기보다 큽니다."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O download é maior do que esta versão indicou."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Загрузка больше, чем указано для этого выпуска."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下载内容比此版本声明的更大。"
+          }
+        }
+      }
+    },
     "The download isn't the extension the store listed as %@." : {
       "localizations" : {
         "de" : {
@@ -121272,6 +121324,58 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "下载的内容不是商店中列为 %@ 的扩展。"
+          }
+        }
+      }
+    },
+    "The download's signature does not match the release key." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Signatur des Downloads passt nicht zum Release-Schlüssel."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La firma de la descarga no coincide con la clave de publicación."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La signature du téléchargement ne correspond pas à la clé de publication."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ダウンロードの署名がリリース鍵と一致しません。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다운로드의 서명이 릴리스 키와 일치하지 않습니다."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A assinatura do download não corresponde à chave de lançamento."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Подпись загрузки не совпадает с ключом выпуска."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下载内容的签名与发布密钥不匹配。"
           }
         }
       }

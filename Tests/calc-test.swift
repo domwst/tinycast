@@ -2696,14 +2696,16 @@ struct CalcTests {
 
     /// No snapshot has landed yet — first run, or still offline.
     static func expectErrorWithoutRates(_ query: String, _ expected: String) {
-        guard
-            case .error(let message)? = CalcEngine.evaluate(
-                query, now: clock.now, calendar: clock.calendar, rates: nil)?.payload
-        else {
+        let result = CalcEngine.evaluate(query, now: clock.now, calendar: clock.calendar, rates: nil)
+        guard case .error(let message)? = result?.payload else {
             fail(query, expected: "error: \(expected)", got: "nil / value")
             return
         }
         check(query, expected: expected, got: message)
+        // The palette starts the first fetch only for a card marked currency.
+        if expected.hasPrefix("Exchange rates unavailable") {
+            check(query + " asks for rates", expected: "true", got: String(result?.isCurrency == true))
+        }
     }
 
     static func expectExpression(_ query: String, _ expected: String, region: String? = nil) {

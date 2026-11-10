@@ -122,8 +122,11 @@ final class SettingsFileRepository {
         let target = fileURL.resolvingSymlinksInPath()
         do {
             try FileManager.default.createDirectory(
-                at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+                at: target.deletingLastPathComponent(), withIntermediateDirectories: true,
+                attributes: [.posixPermissions: 0o700])
             try data.write(to: target, options: .atomic)
+            // A home folder is group-readable on macOS, and other accounts have no business here.
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: target.path)
         } catch {
             return false
         }

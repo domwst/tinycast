@@ -27,7 +27,7 @@ struct UpdatesTests {
         rejectsUnusableFeeds()
         offersOnlyWhatIsWorthInstalling()
         picksTheSignatureBesideItsZip()
-        refusesWhatNeitherTrustPathVouchesFor()
+        refusesWhatTheRunningIdentityDoesNotVouchFor()
         verifiesTheReleaseSignature()
         blocksWhileBusy()
 
@@ -291,25 +291,24 @@ struct UpdatesTests {
             "a release without a signature is still offered, for the identity path to judge")
     }
 
-    static func refusesWhatNeitherTrustPathVouchesFor() {
-        var requirement: SecRequirement?
-        let status = SecRequirementCreateWithString(
-            BundleSignature.developerID as CFString, [], &requirement)
-        expect(
-            status == errSecSuccess && requirement != nil,
-            "the Developer ID requirement compiles, or the release key would trust nothing")
-
+    /// Any team once passed with the release key; now only the identity that signed this copy does.
+    static func refusesWhatTheRunningIdentityDoesNotVouchFor() {
         let apple = URL(fileURLWithPath: "/System/Applications/Calculator.app")
+        let tinycast = #"identifier "com.tinycast.app" and anchor apple generic"#
         expect(
-            BundleSignature.trustedHash(of: apple, releaseSigned: true) == nil,
-            "the release key alone never trusts a bundle outside Developer ID")
+            BundleSignature.trustedHash(of: apple, requirement: tinycast) == nil,
+            "a bundle signed by another identity is refused, whoever signed it")
         expect(
-            BundleSignature.trustedHash(of: apple, releaseSigned: false) == nil,
-            "without the key, a bundle signed by another identity is refused")
+            BundleSignature.trustedHash(
+                of: apple, requirement: #"identifier "com.apple.calculator" and anchor apple"#) != nil,
+            "the identity a requirement names is trusted, so the check is not refusing everything")
         expect(
-            BundleSignature.trustedHash(of: URL(fileURLWithPath: "/nonexistent.app"), releaseSigned: true)
+            BundleSignature.trustedHash(of: URL(fileURLWithPath: "/nonexistent.app"), requirement: tinycast)
                 == nil,
-            "and nothing is trusted without a seal to check")
+            "nothing is trusted without a seal to check")
+        expect(
+            BundleSignature.trustedHash(of: apple, requirement: "not a requirement") == nil,
+            "a requirement that does not compile trusts nothing")
     }
 
     static func verifiesTheReleaseSignature() {

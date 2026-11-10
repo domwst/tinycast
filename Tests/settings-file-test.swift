@@ -218,6 +218,12 @@ struct SettingsFileTest {
         check(
             "a missing file is written from the current settings, folder and all",
             contents(of: url).contains(#""popToRootSeconds": 15"#))
+        func mode(_ path: String) -> Int? {
+            (try? FileManager.default.attributesOfItem(atPath: path))?[.posixPermissions] as? Int
+        }
+        check(
+            "and only its owner can read either",
+            mode(url.path) == 0o600 && mode(url.deletingLastPathComponent().path) == 0o700)
 
         let edited = #"{"general": {"showInMenuBar": false, "popToRootSeconds": 30}}"#
         try write(edited, to: url)

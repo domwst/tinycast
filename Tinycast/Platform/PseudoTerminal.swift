@@ -24,7 +24,7 @@ final class PseudoTerminal: @unchecked Sendable {
         var attributes: posix_spawnattr_t?
         posix_spawnattr_init(&attributes)
         // The whole point: the child leads its session, so `kill(-pid)` reaches it all.
-        posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETSID))
+        posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETSID | POSIX_SPAWN_CLOEXEC_DEFAULT))
 
         var actions: posix_spawn_file_actions_t?
         posix_spawn_file_actions_init(&actions)

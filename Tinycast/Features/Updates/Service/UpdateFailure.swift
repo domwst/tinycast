@@ -2,6 +2,8 @@ import Foundation
 
 enum UpdateFailure: LocalizedError, Equatable {
     case downloadFailed(String)
+    case downloadTooLarge
+    case signatureInvalid
     case extractFailed(String)
     case noAppInArchive
     case quarantined
@@ -14,6 +16,10 @@ enum UpdateFailure: LocalizedError, Equatable {
         switch self {
         case .downloadFailed(let detail):
             return String(localized: "The download did not finish. \(detail)")
+        case .downloadTooLarge:
+            return String(localized: "The download is larger than this release said it would be.")
+        case .signatureInvalid:
+            return String(localized: "The download's signature does not match the release key.")
         case .extractFailed(let detail):
             return String(localized: "The downloaded archive could not be expanded. \(detail)")
         case .noAppInArchive:
@@ -35,7 +41,8 @@ enum UpdateFailure: LocalizedError, Equatable {
 
     var recoverySuggestion: String? {
         switch self {
-        case .identityMismatch, .bundleMismatch, .versionMismatch:
+        case .identityMismatch, .bundleMismatch, .versionMismatch, .signatureInvalid,
+            .downloadTooLarge:
             return String(
                 localized: """
                     Nothing was installed. Download the release from GitHub instead, so you can \

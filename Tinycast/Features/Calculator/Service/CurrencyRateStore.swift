@@ -33,9 +33,9 @@ final class CurrencyRateStore {
         if CurrencyFeed.pricesCoins(cached) { completedAt = cached.fetchedAt }
     }
 
-    func start() {
-        // Replace rather than bail: an exited loop leaves a non-nil task that would block restart.
-        pump?.cancel()
+    /// Started by the first currency query, never at launch: typing one is what asks for rates.
+    func requestRates() {
+        guard pump == nil else { return }
         pump = Task { [weak self] in
             while !Task.isCancelled, let self {
                 // Clamped, so a future-stamped snapshot can't park the loop past one interval.

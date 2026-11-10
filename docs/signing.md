@@ -126,22 +126,20 @@ rejection, and a usage string missing its entitlement ships a permission that ca
 
 ## Update trust
 
-The updater trusts a downloaded bundle through either of two roots
-([features/updates.md](features/updates.md)):
+The updater trusts a downloaded bundle only through the running copy's identity, with the release
+key as a second check ([features/updates.md](features/updates.md)):
 
+- **The running copy's designated requirement**, read at runtime rather than pinned. For a Developer
+  ID build that is the team, so a certificate renewal still matches. It is always required: this
+  fork no longer accepts Developer ID from any team, so a new team means one install by hand.
 - **The release key.** `Scripts/sign-update.swift` signs every updater zip with
   `UPDATE_SIGNING_KEY`, and refuses unless the built app's `TinycastUpdatePublicKey` is its public
-  half, so a release can never ship trusting a key the next one is not signed with. The bundle must
-  still carry a Developer ID signature, from any team, so a leaked key alone cannot ship an ad-hoc
-  build.
-- **The running copy's designated requirement**, read at runtime rather than pinned. For a Developer
-  ID build that is the team, so a certificate renewal still matches.
+  half. A signature the feed lists must verify.
 
-**Never change both in one release.** A new Apple team ships signed by the old key, a new key under
-the old team, and the release after that may change the other. `Scripts/check-update-path.sh`
-enforces it: before notarizing, it downloads the last release on the channel and fails the run
-unless that release trusts the new build's key or the new build satisfies its designated
-requirement.
+**A new team strands the updater.** Installed copies require their own designated requirement, so
+a release under a new Apple team must be installed by hand once. `Scripts/check-update-path.sh`
+still downloads the last release on the channel before notarizing; for this fork, only its
+designated-requirement branch keeps that release able to update.
 
 ## Developer ID stays in CI
 

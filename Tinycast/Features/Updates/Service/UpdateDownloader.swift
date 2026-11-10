@@ -25,13 +25,23 @@ enum UpdateDownloader {
         }
     }
 
+    /// A signature is a few dozen bytes; anything past this is not one.
+    static let signatureLimit = 65_536
+    /// Even an unreported size stops here, so a lying feed cannot fill the disk.
+    static let archiveLimit: Int64 = 1 << 30
+
     static func data(from url: URL) async throws -> Data {
         let session = URLSession(configuration: configuration)
-        defer { session.finishTasksAndInvalidate() }
-        let (data, response) = try await session.data(for: request(url))
+        defer { session.invalidateAndCancel() }
+        let (bytes, response) = try await session.bytes(for: request(url))
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard status == 200 else {
             throw UpdateFailure.downloadFailed(String(localized: "The server answered \(status)."))
+        }
+        var data = Data()
+        for try await byte in bytes {
+            guard data.count < signatureLimit else { throw UpdateFailure.downloadTooLarge }
+            data.append(byte)
         }
         return data
     }
@@ -72,6 +82,12 @@ private final class Delegate: NSObject, URLSessionDownloadDelegate, @unchecked S
     ) {
         // A server omitting Content-Length reports -1; the release's size is the better guess.
         let total = totalBytesExpectedToWrite > 0 ? totalBytesExpectedToWrite : expected
+        let limit = expected > 0 ? min(expected, UpdateDownloader.archiveLimit) : UpdateDownloader.archiveLimit
+        guard totalBytesWritten <= limit, total <= limit else {
+            downloadTask.cancel()
+            events.finish(throwing: UpdateFailure.downloadTooLarge)
+            return
+        }
         events.yield(.progress(received: totalBytesWritten, expected: total))
     }
 

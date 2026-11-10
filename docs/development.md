@@ -201,7 +201,11 @@ node Scripts/gen-emoji.js            # -> Tinycast/Features/Emoji/Model/EmojiDat
                                      #    + Tinycast/Resources/EmojiKeywords/<language>.txt
 node Scripts/gen-currencies.js       # -> Tinycast/Features/Calculator/Model/CurrencyData.generated.swift
 node Scripts/gen-countries.js        # -> Tinycast/Features/Calculator/Model/CountryZoneData.generated.swift
+node Scripts/gen-dictation-manifest.js # -> Tinycast/Features/Dictation/Model/DictationModelFiles.generated.swift
 ```
+
+`gen-dictation-manifest.js` pins every file of each dictation model by size and SHA-256. Re-run it
+after changing a model's repository, revision or components; `dictation-test` fails until you do.
 
 `gen-emoji.js` also writes one CLDR keyword pack per language in its `KEYWORD_LOCALES`; adding a
 language is one line there. Pass a directory to keep the downloads between runs:

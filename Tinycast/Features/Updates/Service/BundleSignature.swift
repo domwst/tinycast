@@ -2,19 +2,29 @@ import Foundation
 import Security
 
 enum BundleSignature {
-    /// Any team, so a new one still updates through the release key, but never an ad-hoc build.
-    static let developerID = """
-        anchor apple generic \
-        and certificate 1[field.1.2.840.113635.100.6.2.6] exists \
-        and certificate leaf[field.1.2.840.113635.100.6.1.13] exists
-        """
+    /// The running copy's own requirement as text, read before any swap can change what is on disk.
+    static func runningRequirement() -> String? {
+        var code: SecCode?
+        var staticCode: SecStaticCode?
+        var requirement: SecRequirement?
+        var text: CFString?
+        guard SecCodeCopySelf([], &code) == errSecSuccess, let code,
+            SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess, let staticCode,
+            SecCodeCopyDesignatedRequirement(staticCode, [], &requirement) == errSecSuccess,
+            let requirement,
+            SecRequirementCopyString(requirement, [], &text) == errSecSuccess
+        else { return nil }
+        return text as String?
+    }
 
     /// Returned so the swap at quit can pin the exact bytes that were verified.
-    static func trustedHash(of bundleURL: URL, releaseSigned: Bool) -> Data? {
+    static func trustedHash(of bundleURL: URL, requirement text: String) -> Data? {
         var staticCode: SecStaticCode?
-        guard SecStaticCodeCreateWithPath(bundleURL as CFURL, [], &staticCode) == errSecSuccess,
+        var requirement: SecRequirement?
+        guard SecRequirementCreateWithString(text as CFString, [], &requirement) == errSecSuccess,
+            let requirement,
+            SecStaticCodeCreateWithPath(bundleURL as CFURL, [], &staticCode) == errSecSuccess,
             let staticCode,
-            let requirement = releaseSigned ? compiled(developerID) : runningRequirement,
             SecStaticCodeCheckValidity(staticCode, flags, requirement) == errSecSuccess
         else { return nil }
         return uniqueHash(of: staticCode)
@@ -23,25 +33,6 @@ enum BundleSignature {
     /// An unsealed bundle can claim any identity, and a nested helper is where one hides.
     private static let flags = SecCSFlags(
         rawValue: kSecCSCheckAllArchitectures | kSecCSCheckNestedCode | kSecCSStrictValidate)
-
-    private static func compiled(_ text: String) -> SecRequirement? {
-        var requirement: SecRequirement?
-        guard SecRequirementCreateWithString(text as CFString, [], &requirement) == errSecSuccess
-        else { return nil }
-        return requirement
-    }
-
-    /// The running copy's own requirement, never a pinned one, so a renewed certificate matches.
-    private static var runningRequirement: SecRequirement? {
-        var code: SecCode?
-        var staticCode: SecStaticCode?
-        var requirement: SecRequirement?
-        guard SecCodeCopySelf([], &code) == errSecSuccess, let code,
-            SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess, let staticCode,
-            SecCodeCopyDesignatedRequirement(staticCode, [], &requirement) == errSecSuccess
-        else { return nil }
-        return requirement
-    }
 
     private static func uniqueHash(of staticCode: SecStaticCode) -> Data? {
         var information: CFDictionary?

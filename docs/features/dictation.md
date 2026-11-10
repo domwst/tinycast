@@ -94,9 +94,12 @@ compilation of its 2-bit weights; Ultra's encoder and both variants' decoder/joi
   correction would mean deleting and retyping inside foreign apps, which is fragile next to a
   moving cursor and the user's own edits.
 - Model files download through a feature-private ephemeral session without a disk URL cache.
-  Repositories and revisions are explicit in `DictationModel`; each download is staged and
-  published only when all required files arrive, their sizes agree with the manifest and large-file
-  SHA-256 checksums match. Settings shows combined byte counts and a percentage in a full-width
+  Repositories and revisions are explicit in `DictationModel`, and every file each one takes is
+  pinned by path, size and SHA-256 in `DictationModelFiles.generated.swift`, from
+  `node Scripts/gen-dictation-manifest.js`. The host is never asked what a model holds, so a
+  compromised one cannot hand out other files with matching hashes. Each download is staged and
+  published only when every pinned file arrives with its size and SHA-256. `dictation-test` fails
+  while a model's revision and the pinned list disagree. Settings shows combined byte counts and a percentage in a full-width
   progress row for the selected model. Download delegate callbacks report actual transferred bytes,
   with intermediate updates limited to one per 100 ms per file; each verified file reports its final
   count immediately. Progress observation stays in the download row. Switching

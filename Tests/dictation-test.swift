@@ -11,6 +11,20 @@ struct DictationTest {
             }
         }
 
+        // The pinned list must name the revision each model asks for, or regenerating was skipped.
+        for model in DictationModel.allCases {
+            let files = DictationModelFiles.files(for: model)
+            let own = files.filter { $0.repository == model.repository }
+            let covered = model.requiredFiles.allSatisfy { name in
+                files.contains { $0.path == name || $0.path.hasPrefix(name + "/") }
+            }
+            let pinned = !own.isEmpty && own.allSatisfy { $0.revision == model.revision }
+            let hashed = files.allSatisfy { $0.sha256.count == 64 && $0.size >= 0 }
+            check(
+                "\(model.rawValue) pinned: \(pinned && covered && hashed)",
+                "\(model.rawValue) pinned: true")
+        }
+
         typealias Context = DictationTextFormatter.Context
         check(DictationTextFormatter.format("  Hello. \n", context: nil), "Hello.")
         check(DictationTextFormatter.format("hello", context: Context(before: "", after: "")), "Hello")

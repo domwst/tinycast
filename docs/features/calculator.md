@@ -18,6 +18,10 @@ in (see Currency below).
   only at presentation — the card, the actions header, a history row, the pasteboard. No grammar,
   tokenizer rule or formatter learns about locales, and `CalculatorHistoryStore` stores canonical
   text, so history re-renders in whatever format is chosen later.
+- **Nothing fetches rates until a currency query asks.** `AppCore` no longer starts the pump at
+  launch. The palette calls `CurrencyRateStore.requestRates()` when the launcher or calculator
+  history shows a card marked `isCurrency`, an error card for missing rates included, and only then
+  does the daily refresh begin. Typing a conversion is the consent; `2 + 2` sends nothing.
 - **`CalcEngine.evaluate` never fetches** — it takes a finished `CurrencyRates?`, nil meaning no
   snapshot has landed yet. `CurrencyRateStore` owns the fetch and the cacheless `.ephemeral` session,
   and `CurrencyFeed` — pure, so the harness covers it — turns the payloads into that snapshot.

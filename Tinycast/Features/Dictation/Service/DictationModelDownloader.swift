@@ -4,17 +4,11 @@ import Foundation
 import Synchronization
 
 enum DictationModelDownloader {
-    private struct File: Decodable {
-        struct LargeFile: Decodable { let oid: String }
-        let path: String
-        let type: String
-        let size: Int64
-        let lfs: LargeFile?
-    }
-
+    /// `files` is the build's pinned list; the host is never asked what a model holds or hashes to.
     static func download(
         _ model: DictationModel, destination: URL,
         baseURL: URL = URL(string: "https://huggingface.co/")!,
+        files pinned: [DictationModelFiles.File]? = nil,
         protocolClasses: [AnyClass]? = nil,
         onProgress: @escaping @Sendable (Int64, Int64) -> Void = { _, _ in }
     ) async throws {
@@ -52,16 +46,7 @@ enum DictationModelDownloader {
         let staging = root.appendingPathComponent(".\(UUID().uuidString)")
         try fileManager.createDirectory(at: staging, withIntermediateDirectories: true)
         defer { try? fileManager.removeItem(at: staging) }
-        var files = try await manifest(
-            repository: model.repository, revision: model.revision,
-            components: model.components, baseURL: baseURL, using: session)
-        if model.isQwen {
-            files += try await manifest(
-                repository: "Qwen/Qwen3-ASR-0.6B",
-                revision: "5eb144179a02acc5e5ba31e748d22b0cf3e303b0",
-                components: ["vocab.json", "merges.txt"],
-                baseURL: baseURL, using: session)
-        }
+        let files = try locations(of: pinned ?? DictationModelFiles.files(for: model), baseURL: baseURL)
         var total: Int64 = 0
         for (file, _) in files {
             let sum = total.addingReportingOverflow(file.size)
@@ -84,7 +69,7 @@ enum DictationModelDownloader {
             try validate(response)
             let actual = try target.resourceValues(forKeys: [.fileSizeKey]).fileSize
             guard actual.map(Int64.init) == file.size else { throw URLError(.badServerResponse) }
-            if let checksum = file.lfs?.oid { try verify(target, checksum: checksum) }
+            try verify(target, checksum: file.sha256)
             received += file.size
             onProgress(received, total)
         }
@@ -93,22 +78,10 @@ enum DictationModelDownloader {
         try fileManager.moveItem(at: staging, to: destination)
     }
 
-    private static func manifest(
-        repository: String, revision: String, components: Set<String>, baseURL: URL, using session: URLSession
-    ) async throws -> [(File, URL)] {
-        let tree = baseURL.appending(path: "api/models/\(repository)/tree/\(revision)")
-            .appending(queryItems: [URLQueryItem(name: "recursive", value: "true")])
-        let files = try JSONDecoder().decode([File].self, from: try await data(from: tree, using: session))
-            .filter { file in
-                file.type == "file"
-                    && components.contains(file.path.split(separator: "/").first.map(String.init) ?? "")
-            }
-        guard
-            components.allSatisfy({ component in
-                files.contains { $0.path == component || $0.path.hasPrefix(component + "/") }
-            })
-        else { throw URLError(.cannotParseResponse) }
-
+    private static func locations(
+        of files: [DictationModelFiles.File], baseURL: URL
+    ) throws -> [(DictationModelFiles.File, URL)] {
+        guard !files.isEmpty else { throw URLError(.cannotParseResponse) }
         return try files.map { file in
             let path = file.path.split(separator: "/")
             guard file.size >= 0, !path.isEmpty, file.path == path.joined(separator: "/"),
@@ -116,7 +89,8 @@ enum DictationModelDownloader {
             else {
                 throw URLError(.cannotParseResponse)
             }
-            return (file, baseURL.appending(path: "\(repository)/resolve/\(revision)/\(file.path)"))
+            let resolved = "\(file.repository)/resolve/\(file.revision)/\(file.path)"
+            return (file, baseURL.appending(path: resolved))
         }
     }
 
@@ -194,12 +168,6 @@ enum DictationModelDownloader {
         guard hash.finalize().map({ String(format: "%02x", $0) }).joined() == checksum else {
             throw URLError(.badServerResponse)
         }
-    }
-
-    private static func data(from url: URL, using session: URLSession) async throws -> Data {
-        let (data, response) = try await session.data(from: url)
-        try validate(response)
-        return data
     }
 
     private static func validate(_ response: URLResponse) throws {

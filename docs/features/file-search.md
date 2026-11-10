@@ -28,6 +28,11 @@ design follows [fsearch](https://github.com/noahdunnagan/fsearch).
   duplicate or an event that races a rebuild changes nothing twice.
 - **File Search is off by default, and off means no index on disk.** Disabling stops the watcher, cancels
   any build and deletes `Application Support/<bundle id>/FileIndex/`.
+- **The index never lists what Full Disk Access guards in `~/Library`.** The crawl runs with
+  Tinycast's grants, but `index.bin` is readable by anything running as you, so
+  `FileSearchIgnoreList.privacyProtected` skips Messages, Safari, Calendars and the other private
+  stores by default. Desktop, Documents, Downloads and iCloud Drive are indexed by design: finding
+  their files is the point, and their names sit in the index unencrypted.
 - **The shipped ignore rules are compiled in and never persisted.** `fileSearchIgnorePatterns` stores
   only what the user added and `fileSearchRemovedDefaultPatterns` only the shipped rules they removed,
   so changing `FileSearchIgnoreList.defaults` reaches installs that already ran. Every row can be

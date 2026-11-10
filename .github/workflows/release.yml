@@ -57,13 +57,20 @@ jobs:
 
       - name: Compute release metadata
         id: meta
+        # Inputs arrive as environment, never pasted into the script, so a version cannot run code.
+        env:
+          CHANNEL: ${{ github.event.inputs.channel }}
+          BASE_VERSION: ${{ github.event.inputs.version }}
         run: |
-          CHANNEL="${{ github.event.inputs.channel }}"
-          BASE_VERSION="${{ github.event.inputs.version }}"
+          if ! [[ "$BASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::The version must look like 1.2.3."
+            exit 1
+          fi
           # Each channel is a distinct side-by-side app with its own name, bundle id and cask.
           case "$CHANNEL" in
             beta)   SUFFIX="-beta.${GITHUB_RUN_NUMBER}";  DISPLAY="Tinycast Beta";  BUNDLE="com.tinycast.app.beta";  CASK="tinycast@beta";  PRERELEASE=true ;;
             stable) SUFFIX="";                            DISPLAY="Tinycast";       BUNDLE="com.tinycast.app";       CASK="tinycast";       PRERELEASE=false ;;
+            *)      echo "::error::Unknown channel."; exit 1 ;;
           esac
           FULL="${BASE_VERSION}${SUFFIX}"
           {
@@ -124,9 +131,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           DISPLAY_NAME: ${{ steps.meta.outputs.display_name }}
+          CHANNEL: ${{ github.event.inputs.channel }}
         run: |
           ./Scripts/check-update-path.sh "$RUNNER_TEMP/DerivedData/Build/Products/Release/${DISPLAY_NAME}.app" \
-            "${{ github.event.inputs.channel }}"
+            "$CHANNEL"
 
       - name: Notarize DMG and ZIP
         env:
