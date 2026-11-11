@@ -38,6 +38,7 @@ final class NotesStore {
     @ObservationIgnored private var saveTask: Task<Void, Never>?
     @ObservationIgnored private var searchTask: Task<Void, Never>?
     @ObservationIgnored private var searchWorker: Task<[NoteSearchResult], Never>?
+    /// Set by a failed write, so one flush tries the folder once rather than twice in a row.
     private var saveFailed = false
     /// A folder change that waits on a draft the old folder could not take yet.
     @ObservationIgnored private var pendingRelocation: NotesRepository?
@@ -92,14 +93,7 @@ final class NotesStore {
         source = updated
         sourceRevision &+= 1
         isDirty = true
-        saveFailed = false
         scheduleSave()
-    }
-
-    @discardableResult
-    func retrySave() async -> Bool {
-        saveFailed = false
-        return await flush()
     }
 
     /// The one place a write starts, so a debounced save and a flush can never overlap on one file.
@@ -107,6 +101,8 @@ final class NotesStore {
     func flush() async -> Bool {
         saveDebounce?.cancel()
         saveDebounce = nil
+        // Every flush tries again: a draft a full disk refused once must still save at quit.
+        saveFailed = false
         // Two rounds: one for a write already in flight, one for an edit that landed while it ran.
         for _ in 0..<2 {
             if let saveTask {
@@ -374,7 +370,6 @@ final class NotesStore {
         source = document?.source ?? ""
         editorEpoch &+= 1
         isDirty = false
-        saveFailed = false
         isLoaded = true
         saveSelection(document?.id)
     }

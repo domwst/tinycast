@@ -629,6 +629,8 @@ final class AppCore {
         snippetListener.stop()
         snippetsStore.stop()
         aiChats.reset()
+        // Closing the last handle folds the WAL back in, so no older frame of a chat stays behind.
+        chatHistory.close()
         chatGPTSubscription.stop()
         mcpOAuth.stop()
         mcp.stop()

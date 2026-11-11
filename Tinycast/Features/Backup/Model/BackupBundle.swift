@@ -139,12 +139,38 @@ struct BackupBundle: Sendable {
     func documents(in directory: URL, extension ext: String) -> [(name: String, contents: String)] {
         let names = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
         return names.sorted().compactMap { name in
-            guard Self.isSafeName(name), (name as NSString).pathExtension == ext,
+            guard Self.isSafeName(name),
+                (name as NSString).pathExtension.caseInsensitiveCompare(ext) == .orderedSame,
                 let contents = try? String(
                     contentsOf: directory.appendingPathComponent(name), encoding: .utf8)
             else { return nil }
             return (name, contents)
         }
+    }
+
+    /// Exactly the files the feature lists: Snippets reads through a link and Notes ignores one.
+    func copyDocuments(
+        from source: URL, to destination: URL, followingLinks: Bool
+    ) throws -> Int {
+        let keys: Set<URLResourceKey> = [.isRegularFileKey, .isSymbolicLinkKey, .isHiddenKey]
+        let entries =
+            (try? FileManager.default.contentsOfDirectory(
+                at: source, includingPropertiesForKeys: Array(keys), options: [.skipsHiddenFiles]))
+            ?? []
+        var copied = 0
+        for entry in entries.sorted(by: { $0.lastPathComponent < $1.lastPathComponent })
+        where entry.pathExtension.caseInsensitiveCompare("md") == .orderedSame {
+            let name = entry.lastPathComponent
+            // Resolved: a followed link travels as a file, since the reader refuses links.
+            let file = followingLinks ? entry.resolvingSymlinksInPath() : entry
+            guard BackupBundle.isSafeName(name),
+                let values = try? file.resourceValues(forKeys: keys),
+                values.isRegularFile == true, values.isSymbolicLink != true, values.isHidden != true
+            else { continue }
+            try FileManager.default.copyItem(at: file, to: destination.appendingPathComponent(name))
+            copied += 1
+        }
+        return copied
     }
 
     func decodeLearning<Value: Decodable>(_ part: LearningPart, as type: Value.Type) -> Value? {
@@ -184,7 +210,8 @@ struct BackupBundle: Sendable {
             && name.rangeOfCharacter(from: Self.forbidden) == nil
     }
 
-    private static let forbidden = CharacterSet(charactersIn: "/:\\\0")
+    /// Only what splits a name into path components; `:` and a backslash are fine in a title.
+    private static let forbidden = CharacterSet(charactersIn: "/\0")
 
     private func uniqueName(base: String, extension ext: String, in directory: URL) -> String {
         var candidate = "\(base).\(ext)"

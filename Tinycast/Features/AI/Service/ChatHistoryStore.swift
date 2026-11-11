@@ -317,9 +317,11 @@ final class ChatHistoryStore {
         guard ensureDatabase(), let database,
             let statement = prepare("DELETE FROM conversations WHERE id = ?;", in: database)
         else { return }
-        defer { sqlite3_finalize(statement) }
         bind(id.uuidString, to: statement, at: 1)
-        guard sqlite3_step(statement) == SQLITE_DONE else { return }
+        let removed = sqlite3_step(statement) == SQLITE_DONE
+        sqlite3_finalize(statement)
+        guard removed else { return }
+        eraseResidue(in: database, compacting: false)
         conversations.removeAll { $0.id == id }
     }
 
@@ -330,7 +332,14 @@ final class ChatHistoryStore {
                 database, "DELETE FROM conversations WHERE id NOT IN (\(Self.pinnedIDs))", nil,
                 nil, nil) == SQLITE_OK
         else { return }
+        eraseResidue(in: database, compacting: true)
         conversations.removeAll { !$0.isPinned }
+    }
+
+    /// A deleted chat must not outlive its row in a freed page or in an older WAL frame.
+    private func eraseResidue(in database: OpaquePointer, compacting: Bool) {
+        if compacting { sqlite3_exec(database, "VACUUM", nil, nil, nil) }
+        sqlite3_exec(database, "PRAGMA wal_checkpoint(TRUNCATE)", nil, nil, nil)
     }
 
     private static let pinnedIDs =
@@ -347,7 +356,7 @@ final class ChatHistoryStore {
         var removed = 0
         defer {
             sqlite3_finalize(statement)
-            if removed > 0 { sqlite3_exec(database, "VACUUM", nil, nil, nil) }
+            if removed > 0 { eraseResidue(in: database, compacting: true) }
         }
         sqlite3_bind_double(statement, 1, cutoff.timeIntervalSince1970)
         guard sqlite3_step(statement) == SQLITE_DONE else { return 0 }
@@ -370,8 +379,9 @@ final class ChatHistoryStore {
             sqlite3_open_v2(
                 databaseURL.path, &database,
                 SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK,
-            sqlite3_exec(database, "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;", nil, nil, nil)
-                == SQLITE_OK,
+            sqlite3_exec(
+                database, "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA secure_delete=ON;",
+                nil, nil, nil) == SQLITE_OK,
             sqlite3_exec(database, Self.schema, nil, nil, nil) == SQLITE_OK
         else {
             sqlite3_close(database)

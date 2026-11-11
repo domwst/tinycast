@@ -653,8 +653,12 @@ struct SnippetsTests {
         }
 
         seed("Something the reader copied earlier")
+        let seededCount = backing.changeCount
         let unchanged = await injector.copySelection(from: nil, pasteboard: pasteboard)
         check("a copy that never lands returns nothing, not the stale clipboard", unchanged == nil)
+        check(
+            "a copy that never lands leaves the clipboard unwritten",
+            backing.changeCount == seededCount)
         check(
             "the reader's clipboard survives a failed copy",
             backing.string(forType: .string) == "Something the reader copied earlier")
@@ -933,6 +937,11 @@ struct SnippetsTests {
                 && pasteboard.pasteboardItems?[0].data(forType: customType) == nil
                 && pasteboard.pasteboardItems?[0].data(forType: secondType) == nil
         )
+        check(
+            "the lent text is marked transient, so other clipboard managers don't keep it",
+            PasteboardSnapshot.loanMarkers.allSatisfy {
+                pasteboard.pasteboardItems?[0].types.contains($0) == true
+            })
         let restoreResult = lease?.restoreIfOwned()
         let restoredItems = pasteboard.pasteboardItems
         check(
@@ -1303,6 +1312,21 @@ struct SnippetsTests {
             snippets: depthRecords,
             context: context)
         check("reference depth limit leaves the unexpanded token visible", depthResult.text == "{snippet:S6}")
+
+        // Sixteen references a level, five levels deep, is a million expansions without a budget.
+        let fanOut = (0...5).map { index in
+            record(
+                "/tmp/fan-\(index).md",
+                Snippet(
+                    name: "F\(index)",
+                    text: index == 5 ? "x" : String(repeating: "{snippet:F\(index + 1)}", count: 16)))
+        }
+        let fanStarted = Date()
+        let fanResult = SnippetTemplateEngine.expand(fanOut[0], snippets: fanOut, context: context)
+        let fanTook = Date().timeIntervalSince(fanStarted)
+        check(
+            "a fan of references stops at the budget, quickly, took \(fanTook)s",
+            fanTook < 1 && fanResult.text.contains("{snippet:F") && fanResult.text.count < 10_000)
     }
 
     /// Every token, parameter and modifier, against injected clock, locale and UUIDs.
@@ -1878,14 +1902,16 @@ struct SnippetsTests {
             flagsRaw: 0,
             text: "x",
             eventUserData: 0,
-            secureEventInputEnabled: false)
+            secureEventInputEnabled: false,
+            targetProcessID: 0)
         listener.processEvent(
             typeRaw: CGEventType.keyDown.rawValue,
             keyCode: 0,
             flagsRaw: 0,
             text: "x",
             eventUserData: 123,
-            secureEventInputEnabled: false)
+            secureEventInputEnabled: false,
+            targetProcessID: 0)
         check(
             "real user input invalidates pending automatic delivery while Tinycast events do not",
             activityCount == 1)
@@ -1898,7 +1924,8 @@ struct SnippetsTests {
                 flagsRaw: 0,
                 text: text,
                 eventUserData: 0,
-                secureEventInputEnabled: false)
+                secureEventInputEnabled: false,
+                targetProcessID: 0)
         }
         listener.userActivity()
         check("argument typing and Expand clicks preserve pending delivery", activityCount == 1)
@@ -1916,11 +1943,12 @@ struct SnippetsTests {
         listener.update([snippet])
         var matches = 0
         listener.start(onUserActivity: { activityCount += 1 }, onMatch: { _, _, _, _ in matches += 1 })
-        func typeKeyword() {
-            for character in "#test" {
+        func typeKeyword(_ keyword: String = "#test", into processID: pid_t = 0) {
+            for character in keyword {
                 listener.processEvent(
                     typeRaw: CGEventType.keyDown.rawValue, keyCode: 0, flagsRaw: 0,
-                    text: String(character), eventUserData: 0, secureEventInputEnabled: false)
+                    text: String(character), eventUserData: 0, secureEventInputEnabled: false,
+                    targetProcessID: processID)
             }
         }
         typeKeyword()
@@ -1936,6 +1964,19 @@ struct SnippetsTests {
         listener.isPromptingForArguments = false
         try? await Task.sleep(for: .milliseconds(10))
         check("argument text cannot trigger nested expansion", matches == 1)
+        if let frontmost = NSWorkspace.shared.frontmostApplication?.processIdentifier {
+            let elsewhere: pid_t = frontmost == 1 ? 2 : 1
+            typeKeyword(into: elsewhere)
+            try? await Task.sleep(for: .milliseconds(10))
+            check("a keyword typed into another process's panel never expands", matches == 1)
+            typeKeyword("#te", into: elsewhere)
+            typeKeyword("st", into: frontmost)
+            try? await Task.sleep(for: .milliseconds(10))
+            check("a keyword split across two processes never expands", matches == 1)
+            typeKeyword(into: frontmost)
+            try? await Task.sleep(for: .milliseconds(10))
+            check("a keyword typed into the frontmost app expands", matches == 2)
+        }
 
         tap.state = .disabled
         listener.healthCheck()
@@ -2034,6 +2075,11 @@ private final class StubPasteboard: PasteboardAccess {
     @discardableResult
     func clearContents() -> Int {
         backing.clearContents()
+    }
+
+    @discardableResult
+    func prepareForNewContents(with options: NSPasteboard.ContentsOptions) -> Int {
+        backing.prepareForNewContents(with: options)
     }
 
     func writeObjects(_ objects: [any NSPasteboardWriting]) -> Bool {

@@ -55,6 +55,7 @@ enum ShellCommandRunner {
     /// Only the last line is ever shown, so this is a generous bound on one of them.
     private static let standardOutputLimit = 4 * 1024
     private static let shell = "/bin/zsh"
+    private static let interactiveFlag = "-ilc"
     /// Big enough that a chatty command needs few reads, small enough to stay live.
     private static let readSize = 16 * 1024
     /// Coalesces bursts so a flood cannot drive a redraw per line.
@@ -168,8 +169,10 @@ enum ShellCommandRunner {
         }
         return ShellCommandSession(
             events: events,
-            stop: { [weak stopFlag = stopped] in
+            stop: { [weak stopFlag = stopped, interactive = launch.isInteractive] in
                 stopFlag?.mark()
+                // First, so the shell is gone before a job's death would let it run the next one.
+                if interactive { terminal.hangUpShell() }
                 terminal.signalSession(SIGTERM)
                 // The backstop, for a command that ignores a polite ask.
                 queue.asyncAfter(deadline: .now() + stopGrace) {
@@ -329,6 +332,8 @@ enum ShellCommandRunner {
         let directory: String
         let script: URL?
 
+        var isInteractive: Bool { arguments.first == ShellCommandRunner.interactiveFlag }
+
         func removeScript() {
             guard let script else { return }
             try? FileManager.default.removeItem(at: script)
@@ -349,7 +354,7 @@ enum ShellCommandRunner {
                 reason: String(localized: "The folder “\(workingDirectory ?? "")” no longer exists."))
         }
         // zsh reads `.zshrc` only for interactive shells, so `-l` alone sees no aliases.
-        let flag = loadingShellEnvironment ? "-ilc" : "-lc"
+        let flag = loadingShellEnvironment ? interactiveFlag : "-lc"
         guard command.hasPrefix("#!") else {
             return Launch(
                 arguments: [flag, command, "tinycast"] + arguments, directory: directory,

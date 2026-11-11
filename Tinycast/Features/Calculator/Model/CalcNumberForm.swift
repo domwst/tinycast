@@ -47,7 +47,7 @@ enum CalcNumberForm {
                 degrees = value.amount * unit.factor / degree.factor
             default: return nil
             }
-            let text = sexagesimal(degrees, marks: ("° ", "′ ", "″"))
+            guard let text = sexagesimal(degrees, marks: ("° ", "′ ", "″")) else { return nil }
             return .phrase(
                 query, .value(display: text, copyText: text),
                 target: String(localized: "Degrees, Minutes, Seconds"),
@@ -55,7 +55,8 @@ enum CalcNumberForm {
         case .hoursMinutesSeconds:
             guard case .unit(let unit) = value.kind, unit.category == .time, let hour = CalcUnits.byName["hr"]
             else { return nil }
-            let text = sexagesimal(value.amount * unit.factor / hour.factor, marks: ("h ", "m ", "s"))
+            let hours = value.amount * unit.factor / hour.factor
+            guard let text = sexagesimal(hours, marks: ("h ", "m ", "s")) else { return nil }
             return .phrase(
                 query, .value(display: text, copyText: text),
                 target: String(localized: "Hours, Minutes, Seconds"),
@@ -64,7 +65,7 @@ enum CalcNumberForm {
             guard case .unit(let unit) = value.kind, unit.category == .time, value.amount >= 0 else {
                 return nil
             }
-            let text = lapTime(value.amount * unit.factor)
+            guard let text = lapTime(value.amount * unit.factor) else { return nil }
             return .phrase(
                 query, .value(display: text, copyText: text), target: String(localized: "Lap Time"),
                 canChain: false)
@@ -90,8 +91,12 @@ enum CalcNumberForm {
         return "\(mantissa)e\(exponent)"
     }
 
-    private static func lapTime(_ seconds: Double) -> String {
+    /// Past 2⁵³ a `Double` skips whole numbers, so a split into smaller parts would be noise.
+    private static let largestExactWhole = Double(1 << 53)
+
+    private static func lapTime(_ seconds: Double) -> String? {
         let milliseconds = (seconds * 1000).rounded()
+        guard milliseconds < largestExactWhole else { return nil }
         let whole = Int(milliseconds / 1000)
         let fraction = milliseconds.truncatingRemainder(dividingBy: 1000)
         var text = String(format: "%02ld:%02ld:%02ld", whole / 3600, whole / 60 % 60, whole % 60)
@@ -104,9 +109,10 @@ enum CalcNumberForm {
     }
 
     /// A whole unit, then sixtieths and their sixtieths, the last kept to two decimals.
-    private static func sexagesimal(_ value: Double, marks: (String, String, String)) -> String {
+    private static func sexagesimal(_ value: Double, marks: (String, String, String)) -> String? {
         let sign = value < 0 ? "-" : ""
         let hundredths = (abs(value) * 360_000).rounded()
+        guard hundredths < largestExactWhole else { return nil }
         let whole = (hundredths / 360_000).rounded(.down)
         let minutes = ((hundredths - whole * 360_000) / 6_000).rounded(.down)
         let seconds = (hundredths - whole * 360_000 - minutes * 6_000) / 100

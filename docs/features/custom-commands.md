@@ -206,8 +206,14 @@ assumed:
   order. Under a pty the same command printed 1, 2, 3.
 
 `PseudoTerminal` also spawns with `POSIX_SPAWN_SETSID`, which is what makes Stop honest: the command
-leads its own session, so one `kill(-pid)` reaches the whole `a && b && c` chain. `Process.terminate`
-signals only zsh — a `sleep` started behind it survives, verified.
+leads its own session, so Stop can find every process in it and signal each process group it holds.
+One `kill(-pid)` is not enough. With **Load Shell Environment** (and every ad-hoc run) zsh is
+interactive: it ignores `TERM`, and job control gives each job a group of its own, so the rest of
+`rsync …; rm -rf "$SRC"` used to run after Stop. Stop therefore hangs up the shell first (interactive
+zsh ends on `HUP` and hangs up its jobs), then sends `TERM` to every group in the session, and
+`KILL` after the grace period. `custom-command-test` stops an interactive `sleep 30 | cat` and a
+`sleep 1; touch` chain. `Process.terminate` signals only zsh — a `sleep` started behind it survives,
+verified.
 
 The pty's stdin gets an EOT byte at spawn, which keeps the invariant a `/dev/null` stdin gave the
 pipe path: a command that prompts reads EOF and moves on rather than waiting on a terminal that will

@@ -572,7 +572,7 @@ struct NotesTests {
             unlisted && store.isDirty && store.source == "Draft after a failed save")
         try FileManager.default.setAttributes(
             [.posixPermissions: 0o755], ofItemAtPath: repository.notesDirectory.path)
-        let retried = await store.retrySave()
+        let retried = await store.flush()
         let retriedSource = try repository.load(activeID).source
         check(
             "the retained draft can still be saved after reopening",
@@ -687,7 +687,7 @@ struct NotesTests {
             "a draft the old folder can't take keeps the store there",
             store.notesDirectory == first.notesDirectory && store.source == "unsaved plan")
 
-        _ = await store.retrySave()
+        _ = await store.flush()
         for _ in 0..<100 where store.notesDirectory != second.notesDirectory {
             try await Task.sleep(for: .milliseconds(10))
         }

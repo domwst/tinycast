@@ -23,7 +23,7 @@ final class PseudoTerminal: @unchecked Sendable {
 
         var attributes: posix_spawnattr_t?
         posix_spawnattr_init(&attributes)
-        // The whole point: the child leads its session, so `kill(-pid)` reaches it all.
+        // The whole point: the child leads its session, so a stop can find every process in it.
         posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETSID | POSIX_SPAWN_CLOEXEC_DEFAULT))
 
         var actions: posix_spawn_file_actions_t?
@@ -56,10 +56,33 @@ final class PseudoTerminal: @unchecked Sendable {
         return PseudoTerminal(parentEnd: parentEnd, processID: processID)
     }
 
-    /// Signals the session rather than the process — the negative pid is what reaches the children.
+    /// Every group in the session, not just the shell's: an interactive shell gives each job one.
     func signalSession(_ signal: Int32) {
+        for group in sessionGroups() { kill(-group, signal) }
+    }
+
+    /// An interactive shell ignores `TERM`, but a hangup ends it along with every job it started.
+    func hangUpShell() {
         guard processID > 0 else { return }
-        kill(-processID, signal)
+        kill(processID, SIGHUP)
+    }
+
+    private func sessionGroups() -> Set<pid_t> {
+        guard processID > 0 else { return [] }
+        var groups: Set<pid_t> = [processID]
+        let capacity = proc_listallpids(nil, 0)
+        guard capacity > 0 else { return groups }
+        // Headroom for processes started between sizing the list and filling it.
+        var processes = [pid_t](repeating: 0, count: Int(capacity) + 64)
+        let found = processes.withUnsafeMutableBytes {
+            proc_listallpids($0.baseAddress, Int32($0.count))
+        }
+        for process in processes.prefix(Int(max(found, 0)))
+        where process > 0 && getsid(process) == processID {
+            let group = getpgid(process)
+            if group > 0 { groups.insert(group) }
+        }
+        return groups
     }
 
     /// Blocks until the command exits. A signalled death reports the signal, the way a shell does.

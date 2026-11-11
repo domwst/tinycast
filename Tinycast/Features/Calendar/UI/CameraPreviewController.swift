@@ -14,7 +14,6 @@ final class CameraPreviewController {
     func present(meeting: MeetingEvent, now: Date) async -> Bool {
         guard !presenting else { return false }
         presenting = true
-        defer { presenting = false }
         let feed = await session.start()
         return await withCheckedContinuation { continuation in
             self.continuation = continuation
@@ -41,6 +40,8 @@ final class CameraPreviewController {
     private func finish(_ taken: Bool) {
         guard let continuation else { return }
         self.continuation = nil
+        // Cleared here, not on return: a close that completes inline must see it already false.
+        presenting = false
         let closing = panel
         panel = nil
         closing?.onAction = nil

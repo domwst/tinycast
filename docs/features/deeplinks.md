@@ -126,7 +126,9 @@ The search screens are `clipboard-history`, `search-emoji`, `calculator-history`
 row's fields, as a hotkey with no selection does. Any other target ignores its input.
 
 - A `create-*` list asks once, then adds every item it can, skipping duplicates as a file import
-  does, and reports the count in a HUD. A quicklink list's question shows each name and link.
+  does, and reports the count in a HUD. A quicklink list's question shows each name and link. A
+  snippet list's shows each name, its keyword and how its text begins, since an armed keyword types
+  into any app; a list of more than 20 snippets is refused rather than shown in part.
 - A volume outside `0`–`100`, or a note named `.` or `..`, refuses the link before anything asks.
 - `openWith` is kept only when it names an installed app's bundle ID.
 - A window size refuses, rather than clamps, a value outside what a saved size allows. `anchor` is a

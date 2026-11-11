@@ -37,6 +37,7 @@ struct AIChatTests {
         segmentsClampSearchOffsets()
         leavingAConversationDropsItsStagedImages()
         retentionPrunesByAgeAndCascades()
+        deletedChatsLeaveNothingOnDisk()
         segmentsInterleaveSearchesAndTools()
         consecutiveToolCallsMerge()
         searchesSeparateToolRuns()
@@ -842,6 +843,48 @@ struct AIChatTests {
         expect(
             AIRetention.forever.cutoff(from: now) == nil,
             "Forever names no cutoff, so nothing is ever pruned")
+    }
+
+    static func deletedChatsLeaveNothingOnDisk() {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tinycast-ai-residue-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = ChatHistoryStore(directory: directory)
+        let now = Date(timeIntervalSince1970: 1_000_000)
+
+        func save(_ marker: String, at moment: Date = now) -> UUID {
+            let id = UUID()
+            var session = ChatSession(id: id, createdAt: moment)
+            let picture = AIImage(data: Data(marker.utf8), mimeType: "image/png")
+            let long = String(repeating: marker, count: 64)
+            session.append(ChatMessage(role: .user, text: long, sentAt: moment, images: [picture]))
+            session.append(ChatMessage(role: .assistant, text: marker, sentAt: moment))
+            store.save(session)
+            return id
+        }
+        func leftOnDisk(_ marker: String) -> [String] {
+            ["ai-chats.sqlite3", "ai-chats.sqlite3-wal", "ai-chats.sqlite3-shm"].filter { name in
+                let file = directory.appendingPathComponent(name)
+                guard let bytes = try? Data(contentsOf: file) else { return false }
+                return bytes.range(of: Data(marker.utf8)) != nil
+            }
+        }
+
+        let unpinned = save("unpinned-\(UUID().uuidString)")
+        let removed = "removed-\(UUID().uuidString)"
+        store.remove(id: save(removed))
+        expect(leftOnDisk(removed).isEmpty, "a deleted chat is readable in \(leftOnDisk(removed))")
+
+        let pruned = "pruned-\(UUID().uuidString)"
+        _ = save(pruned, at: now.addingTimeInterval(-40 * 86_400))
+        store.prune(before: AIRetention.month.cutoff(from: now)!)
+        expect(leftOnDisk(pruned).isEmpty, "a pruned chat is readable in \(leftOnDisk(pruned))")
+
+        let cleared = "cleared-\(UUID().uuidString)"
+        _ = save(cleared)
+        store.clearAll()
+        expect(leftOnDisk(cleared).isEmpty, "a cleared chat is readable in \(leftOnDisk(cleared))")
+        expect(store.session(id: unpinned) == nil, "Delete All takes an unpinned chat too")
     }
 
     static func count(_ database: URL, _ sql: String) -> Int {

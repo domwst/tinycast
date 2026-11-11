@@ -689,6 +689,28 @@ struct CustomCommandTests {
             "read -r answer", loadingShellEnvironment: true)
         check("a command reading stdin fails instead of hanging", !prompted.succeeded)
 
+        // An interactive zsh ignores `TERM` and gives each job a group, so a stop must hang up.
+        func stopInteractive(_ command: String) async -> (ShellCommandResult?, TimeInterval) {
+            let session = ShellCommandRunner.stream(command, loadingShellEnvironment: true)
+            Task {
+                try? await Task.sleep(for: .milliseconds(600))
+                session.stop()
+            }
+            let started = Date()
+            let result = await collect(session).result
+            return (result, Date().timeIntervalSince(started))
+        }
+        let (piped, pipedTook) = await stopInteractive("sleep 30 | cat")
+        check(
+            "stopping an interactive shell ends its pipeline at once, took \(pipedTook)s",
+            piped?.termination == .stopped && pipedTook < 2)
+        let afterStop = zdotdir.appendingPathComponent("after-stop")
+        _ = await stopInteractive("sleep 1; touch \(afterStop.path)")
+        try? await Task.sleep(for: .milliseconds(1_000))
+        check(
+            "stopping an interactive shell keeps the rest of the chain from running",
+            !FileManager.default.fileExists(atPath: afterStop.path))
+
         unsetenv("ZDOTDIR")
 
         try? FileManager.default.removeItem(at: zdotdir)

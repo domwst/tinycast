@@ -81,6 +81,8 @@ enum SnippetTemplateEngine {
     }
 
     private static let maximumReferenceDepth = 5
+    /// Across the whole tree: five levels of sixteen references each would be a million expansions.
+    private static let maximumReferences = 100
     private static let comparisonLocale = Locale(identifier: "en_US_POSIX")
 
     static func expand(
@@ -89,7 +91,8 @@ enum SnippetTemplateEngine {
         context: ExpansionContext,
         userArguments: [String: String] = [:]
     ) -> ExpansionResult {
-        result(
+        var references = maximumReferences
+        return result(
             of: expandText(
                 record.snippet.text,
                 snippets: snippets.sorted { $0.id < $1.id },
@@ -97,7 +100,8 @@ enum SnippetTemplateEngine {
                 userArguments: userArguments,
                 encoding: .none,
                 depth: 0,
-                visitedIDs: [record.id]
+                visitedIDs: [record.id],
+                references: &references
             ))
     }
 
@@ -108,7 +112,8 @@ enum SnippetTemplateEngine {
         userArguments: [String: String] = [:],
         encoding: ValueEncoding = .none
     ) -> ExpansionResult {
-        result(
+        var references = maximumReferences
+        return result(
             of: expandText(
                 text,
                 snippets: [],
@@ -116,7 +121,8 @@ enum SnippetTemplateEngine {
                 userArguments: userArguments,
                 encoding: encoding,
                 depth: 0,
-                visitedIDs: []
+                visitedIDs: [],
+                references: &references
             ))
     }
 
@@ -238,7 +244,8 @@ enum SnippetTemplateEngine {
         userArguments: [String: String],
         encoding: ValueEncoding,
         depth: Int,
-        visitedIDs: Set<StoredSnippet.ID>
+        visitedIDs: Set<StoredSnippet.ID>,
+        references: inout Int
     ) -> Expansion {
         var result = Expansion()
         for segment in parseSegments(text) {
@@ -269,13 +276,14 @@ enum SnippetTemplateEngine {
             case .cursor:
                 result.markCursor()
             case .snippetReference(let key, let source):
-                guard depth < maximumReferenceDepth,
+                guard depth < maximumReferenceDepth, references > 0,
                     let target = resolveReference(key, snippets: snippets),
                     !visitedIDs.contains(target.id)
                 else {
                     result.append(source)
                     continue
                 }
+                references -= 1
                 var nestedVisited = visitedIDs
                 nestedVisited.insert(target.id)
                 result.append(
@@ -286,7 +294,8 @@ enum SnippetTemplateEngine {
                         userArguments: userArguments,
                         encoding: encoding,
                         depth: depth + 1,
-                        visitedIDs: nestedVisited
+                        visitedIDs: nestedVisited,
+                        references: &references
                     ))
             }
         }

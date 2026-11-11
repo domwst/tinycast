@@ -143,10 +143,15 @@ final class SnippetCoordinator {
     /// A link's batch, written only once the reader agrees; copies already here are skipped.
     func importSnippets(offered incoming: [Snippet]) async {
         guard settings.snippetsEnabled, !incoming.isEmpty else { return }
+        guard incoming.count <= Self.largestOfferedBatch else {
+            let refusal = String(
+                localized: "This link offers more snippets than Tinycast can show, so none were added.")
+            return core.showMessage(refusal, tone: .danger)
+        }
         guard
             await core.confirm(
                 title: String(localized: "Add \(incoming.count) snippets from a link?"),
-                message: ListFormatter.localizedString(byJoining: incoming.map(\.name)),
+                message: incoming.map(Self.consentLine).joined(separator: "\n"),
                 symbol: "curlybraces", confirmTitle: String(localized: "Add"), tone: .neutral,
                 confirmRole: .standard)
         else { return }
@@ -164,6 +169,18 @@ final class SnippetCoordinator {
                 title: String(localized: "Import Failed"), message: error.localizedDescription,
                 symbol: "curlybraces", tone: .danger)
         }
+    }
+
+    /// Every line must fit on screen, or Return would agree to what the question never showed.
+    private static let largestOfferedBatch = 20
+    private static let consentExcerptLength = 80
+
+    /// A keyword types its text into any app, so the reader sees both before agreeing to one.
+    private static func consentLine(_ snippet: Snippet) -> String {
+        let flat = snippet.text.split(whereSeparator: \.isNewline).joined(separator: " ")
+        let excerpt = flat.count > consentExcerptLength ? flat.prefix(consentExcerptLength) + "…" : flat
+        guard let keyword = snippet.keyword else { return "\(snippet.name) — \(excerpt)" }
+        return "\(snippet.name) — \(String(localized: "keyword “\(keyword)”")) — \(excerpt)"
     }
 
     /// A new snippet already filled in, from a link; nothing is written until it is saved.

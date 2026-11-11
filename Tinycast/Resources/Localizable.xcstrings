@@ -127988,6 +127988,58 @@
         }
       }
     },
+    "This link offers more snippets than Tinycast can show, so none were added." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dieser Link bietet mehr Textbausteine an, als Tinycast anzeigen kann, daher wurde keiner hinzugefügt."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Este enlace ofrece más fragmentos de los que Tinycast puede mostrar, así que no se añadió ninguno."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ce lien propose plus d’extraits que Tinycast ne peut en afficher, aucun n’a donc été ajouté."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このリンクには Tinycast で表示できる数を超えるスニペットが含まれているため、何も追加されませんでした。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 링크는 Tinycast가 표시할 수 있는 것보다 많은 스니펫을 제공하므로 아무것도 추가하지 않았습니다."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Este link oferece mais trechos do que o Tinycast consegue mostrar, então nenhum foi adicionado."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Эта ссылка предлагает больше сниппетов, чем Tinycast может показать, поэтому ни один не добавлен."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此链接提供的文本片段超出 Tinycast 能显示的数量，因此未添加任何片段。"
+          }
+        }
+      }
+    },
     "This location no longer exists." : {
       "localizations" : {
         "de" : {
@@ -142220,6 +142272,58 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@后"
+          }
+        }
+      }
+    },
+    "keyword “%@”" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stichwort „%@“"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "palabra clave «%@»"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "mot-clé « %@ »"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "キーワード「%@」"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "키워드 “%@”"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "palavra-chave “%@”"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ключевое слово «%@»"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关键词“%@”"
           }
         }
       }

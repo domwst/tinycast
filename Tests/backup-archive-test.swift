@@ -30,6 +30,7 @@ struct BackupArchiveTest {
         defer { try? FileManager.default.removeItem(at: root) }
 
         roundTrip(in: root)
+        documentsAreWhatTheFeatureLists(in: root)
         encryption(in: root)
         clipboardLines(in: root)
         noAbsolutePathsEscape(in: root)
@@ -104,6 +105,36 @@ struct BackupArchiveTest {
         check(
             "the extracted file is owned by the current user",
             (attributes?[.ownerAccountID] as? NSNumber)?.uint32Value == getuid())
+    }
+
+    /// Notes ignores a link, a folder and a hidden file; a colon or an upper-case `.MD` is a note.
+    static func documentsAreWhatTheFeatureLists(in root: URL) {
+        let source = root.appendingPathComponent("documents-source")
+        let outside = root.appendingPathComponent("documents-outside.md")
+        let files = FileManager.default
+        try? files.createDirectory(
+            at: source.appendingPathComponent("folder.md"), withIntermediateDirectories: true)
+        let notes = ["Meeting: Q3 plan.md", "Shouting.MD", "C:\\notes.md"]
+        for name in notes + [".hidden.md", "plain.txt"] {
+            try? Data(name.utf8).write(to: source.appendingPathComponent(name))
+        }
+        try? Data("outside".utf8).write(to: outside)
+        try? files.createSymbolicLink(
+            at: source.appendingPathComponent("linked.md"), withDestinationURL: outside)
+
+        let bundle = BackupBundle(root: root.appendingPathComponent("documents-bundle"))
+        try? bundle.prepare([.notes, .snippets])
+        let notesCopied = try? bundle.copyDocuments(
+            from: source, to: bundle.notesDirectory, followingLinks: false)
+        let snippetsCopied = try? bundle.copyDocuments(
+            from: source, to: bundle.snippetsDirectory, followingLinks: true)
+        check("every note Notes lists is exported, got \(notesCopied ?? -1)", notesCopied == 3)
+        check("Snippets also reads through a link, got \(snippetsCopied ?? -1)", snippetsCopied == 4)
+        let read = bundle.documents(in: bundle.notesDirectory, extension: "md").map(\.name)
+        check("an export reads back whole, got \(read)", Set(read) == Set(notes))
+        let linked = bundle.documents(in: bundle.snippetsDirectory, extension: "md")
+            .first { $0.name == "linked.md" }
+        check("a followed link travels as its file", linked?.contents == "outside")
     }
 
     // MARK: - Encryption

@@ -512,7 +512,7 @@ final class NotesCoordinator {
                     message: failure.localizedDescription,
                     symbol: "text.page",
                     recovery: String(localized: "Retry"))
-                if retry { await store.retrySave() }
+                if retry { await store.flush() }
             case .operation(let failure):
                 _ = await core.reportFailure(
                     title: String(localized: "Couldn't Update Note"),

@@ -337,6 +337,10 @@ bottom with the model picker. ⌘J hands a Quick AI conversation to the window.
   `ChatHistoryStore.prune(before:)` is one `DELETE`, sparing pinned chats, that cascades to messages, images and searches,
   and it `VACUUM`s only when something actually went: pictures live inline as BLOBs, so this is the
   one store where a delete alone frees pages without ever shrinking the file.
+- **A deleted chat leaves nothing readable on disk.** The store opens with `secure_delete=ON`, so a
+  freed page is zeroed, and every delete, prune and Delete All ends in `wal_checkpoint(TRUNCATE)`,
+  so no older WAL frame still holds the chat; Delete All `VACUUM`s too. Quitting closes the handle.
+  `ai-chat-test` searches the database, `-wal` and `-shm` for a deleted chat's text and picture.
 - **Everything but the newest message is bounded.** `ChatSession.boundedContext` sends that message
   whole — truncating what someone just typed is worse than the provider's own error — keeps images
   and documents only on that turn and only up to `AIAttachmentBudget`, inlining an attached text

@@ -23,6 +23,7 @@ private func snippetKeywordCallback(
     }
 
     let eventUserData = event.getIntegerValueField(.eventSourceUserData)
+    let targetProcessID = pid_t(truncatingIfNeeded: event.getIntegerValueField(.eventTargetUnixProcessID))
     let secureEventInputEnabled = IsSecureEventInputEnabled()
     let typeRaw = type.rawValue
     let flagsRaw = event.flags.rawValue
@@ -42,7 +43,8 @@ private func snippetKeywordCallback(
             flagsRaw: flagsRaw,
             text: text,
             eventUserData: eventUserData,
-            secureEventInputEnabled: secureEventInputEnabled)
+            secureEventInputEnabled: secureEventInputEnabled,
+            targetProcessID: targetProcessID)
     }
     return Unmanaged.passUnretained(event)
 }
@@ -129,6 +131,8 @@ final class SnippetKeywordListener: HealthCheckable {
     @ObservationIgnored
     private var onMatch: ((StoredSnippet.ID, String, Int, InjectionTarget?) -> Void)?
     @ObservationIgnored private var matchTask: Task<Void, Never>?
+    /// Who the last keystroke went to; 0 is a tap that reported no target.
+    @ObservationIgnored private var lastTargetProcessID: pid_t = 0
     var isPromptingForArguments = false {
         didSet { clearBuffer() }
     }
@@ -322,9 +326,15 @@ final class SnippetKeywordListener: HealthCheckable {
         flagsRaw: UInt64,
         text: String?,
         eventUserData: Int64,
-        secureEventInputEnabled: Bool
+        secureEventInputEnabled: Bool,
+        targetProcessID: pid_t
     ) {
         guard isRequested, status == .active, !isPromptingForArguments else { return }
+        // Keys aimed at another process go into another field, so the typed prefix is void.
+        if targetProcessID != lastTargetProcessID {
+            lastTargetProcessID = targetProcessID
+            policy.reset()
+        }
         let flags = CGEventFlags(rawValue: flagsRaw)
         let input = SnippetKeywordPolicy.classifyInput(
             text: text,
@@ -339,11 +349,22 @@ final class SnippetKeywordListener: HealthCheckable {
         guard let match = policy.process(input, at: now()) else { return }
         // Sampled here, with the keystroke: by delivery the reader may have moved on.
         let target = InjectionTarget.current()
+        guard Self.receives(target, keysAimedAt: targetProcessID) else { return }
         // Return the triggering key to the app before a modal prompt can take focus.
         matchTask = Task { [weak self] in
             guard let self, !Task.isCancelled else { return }
             self.matchTask = nil
             self.onMatch?(match.snippetID, match.keyword, match.deletionCount, target)
+        }
+    }
+
+    /// Spotlight or a menu-bar panel takes the keys while the app behind it stays frontmost.
+    private static func receives(_ target: InjectionTarget?, keysAimedAt processID: pid_t) -> Bool {
+        guard processID > 0 else { return true }
+        switch target {
+        case .external(let app): return app.processIdentifier == processID
+        case .ownEditor: return processID == getpid()
+        case nil: return true
         }
     }
 

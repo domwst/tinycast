@@ -105,7 +105,8 @@ that decides they exist.
 
 `AppCore` observes enablement and calls `NotesCoordinator.applyEnabled()`. Disabling hides the panel,
 invalidates pending presentation work, cancels search, flushes the draft, and removes the commands. A
-failed flush retains the draft for retry.
+failed flush retains the draft, and every later flush — hiding the panel, quitting, switching notes,
+switching Notes off, the dialog's Retry — tries the write again rather than trusting the last failure.
 
 ## Commands, switcher, and window
 

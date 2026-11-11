@@ -117,8 +117,13 @@ payload and are already compressed.
 that returns `.skip` for any entry whose path is absolute or contains `..`, and then refuses an extract
 holding a symbolic link — a link entry names no `..` at all, so the path filter passes it, and reading
 through one would leave the tree the caller chose. Composing resolves a link for the same reason, so a
-symlinked note travels as a file. `backup-archive-test` builds both hostile archives header-by-header
+symlinked snippet travels as a file. `backup-archive-test` builds both hostile archives header-by-header
 and asserts nothing escapes.
+
+**A backup carries exactly what the feature lists.** `BackupBundle.copyDocuments` takes the same
+files Notes and Snippets do: top-level, not hidden, `.md` in any case. Notes ignores a link, so its
+export skips one, while Snippets reads through a link and its export follows it. A name is refused
+only for `/` or NUL, so a note called "Meeting: Q3 plan" is not silently left out.
 
 **Staging lives in `Caches`, not `temporaryDirectory`.** Export unseals each clipboard image into
 it as a PNG — only a blob the history's key opens, so a row naming any other file is counted missing

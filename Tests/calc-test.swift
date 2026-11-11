@@ -2146,6 +2146,10 @@ struct CalcTests {
         expectBadges("255 to base 7", source: "Decimal", target: "Base 7")
         expectDisplay("90 min to laptime", "01:30:00")
         expectDisplay("75.5 seconds to lap time", "00:01:15.5")
+        for overflow in ["1e30 s to laptime", "9223372036854775807 s to laptime", "1e303 to dms",
+            "1e305 hours to hms"] {
+            expectNil(overflow)
+        }
         expectDisplay("440 hz to pitch", "A4")
         expectDisplay("261.63 hz to pitch", "C4")
         expectDisplay("1 khz to note", "B5")

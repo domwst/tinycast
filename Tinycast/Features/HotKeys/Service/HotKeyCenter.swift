@@ -1,4 +1,5 @@
 import Carbon.HIToolbox
+import os
 
 @MainActor
 private func hotKeyCarbonEventHandler(
@@ -25,6 +26,8 @@ private func hotKeyCarbonEventHandler(
 /// The Carbon layer only; which shortcuts exist is `HotKeyManager`'s business.
 @MainActor
 final class HotKeyCenter {
+    private static let logger = Logger(subsystem: "com.tinycast", category: "HotKeys")
+
     private struct Entry {
         let shortcut: KeyShortcut
         let onKeyDown: (UInt64) -> Void
@@ -83,7 +86,8 @@ final class HotKeyCenter {
         )
         // Another app may own the combo; the binding stays visible but doesn't fire.
         guard error == noErr, let ref else {
-            NSLog("Tinycast: could not register hotkey for %@ (OSStatus %d)", id, error)
+            // A snippet's id is its file path, which a sysdiagnose must not carry.
+            Self.logger.error("Couldn't register hotkey \(id, privacy: .private): OSStatus \(error)")
             return
         }
         entry.ref = ref
