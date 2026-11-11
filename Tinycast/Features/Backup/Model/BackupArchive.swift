@@ -50,11 +50,24 @@ enum BackupArchive {
     }
 
     /// Apple Encrypted Archive: scrypt-derived key, AES-CTR + HMAC, LZFSE inside the encryption.
+    /// Written beside the destination and renamed over it, so a failed export keeps the old file.
     static func seal(directory: URL, into file: URL, passphrase: String) throws {
+        let partial = file.deletingLastPathComponent()
+            .appendingPathComponent(".\(file.lastPathComponent).\(UUID().uuidString).partial")
+        do {
+            try sealArchive(directory: directory, into: partial, passphrase: passphrase)
+            guard Darwin.rename(partial.path, file.path) == 0 else { throw ArchiveError.cannotWrite }
+        } catch {
+            try? FileManager.default.removeItem(at: partial)
+            throw error
+        }
+    }
+
+    private static func sealArchive(directory: URL, into file: URL, passphrase: String) throws {
         let context = try encryptionContext(passphrase: passphrase, rounds: stretchRounds)
         guard let keySet,
             let destination = ArchiveByteStream.fileStream(
-                path: FilePath(file.path), mode: .writeOnly, options: [.create, .truncate],
+                path: FilePath(file.path), mode: .writeOnly, options: [.create, .exclusiveCreate],
                 permissions: FilePermissions(rawValue: 0o600)),
             let encryptor = ArchiveByteStream.encryptionStream(
                 writingTo: destination, encryptionContext: context)

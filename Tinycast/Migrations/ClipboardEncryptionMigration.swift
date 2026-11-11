@@ -19,6 +19,9 @@ nonisolated enum ClipboardEncryptionMigration {
             return false
         case .absent, .discardable:
             ClipboardStore.removeDatabase(at: converting)
+            // Nothing this key could read is left, so neither is a stray plaintext copy.
+            ClipboardStore.removeDatabase(at: database)
+            removePlaintext(in: images)
             return true
         case .sealed:
             ClipboardStore.removeDatabase(at: converting)
@@ -31,6 +34,8 @@ nonisolated enum ClipboardEncryptionMigration {
         ClipboardStore.removeDatabase(at: converting)
         guard convert(database, into: converting, images: images, cipher: cipher, home: home) else {
             ClipboardStore.removeDatabase(at: converting)
+            // The next run seals under a new key, so what this one sealed can never be opened.
+            removeSealedLeftovers(in: images)
             return false
         }
         ClipboardStore.removeDatabase(at: database)
@@ -38,6 +43,14 @@ nonisolated enum ClipboardEncryptionMigration {
         guard rename(converting.path, database.path) == 0 else { return false }
         removePlaintext(in: images)
         return true
+    }
+
+    /// The reader's way out of a history that will never convert: the plaintext goes, not kept.
+    static func discardUnconverted(database: URL, images: URL) {
+        ClipboardStore.removeDatabase(at: URL(fileURLWithPath: database.path + ".converting"))
+        ClipboardStore.removeDatabase(at: database)
+        removePlaintext(in: images)
+        removeSealedLeftovers(in: images)
     }
 
     /// Finishes a swap a crash interrupted; false while its copy still waits, so nothing re-keys.
@@ -121,7 +134,10 @@ nonisolated enum ClipboardEncryptionMigration {
         guard sqlite3_prepare_v2(source, select, -1, &read, nil) == SQLITE_OK,
             sqlite3_prepare_v2(destination, insert, -1, &write, nil) == SQLITE_OK, let write
         else { return false }
-        while sqlite3_step(read) == SQLITE_ROW {
+        while true {
+            // A damaged page ends the read early, and only reaching the end counts as converted.
+            let status = sqlite3_step(read)
+            guard status == SQLITE_ROW else { return status == SQLITE_DONE }
             guard let id = ClipboardStore.columnString(read, 0).flatMap(UUID.init(uuidString:)),
                 let kind = ClipboardStore.columnString(read, 1).flatMap(ClipboardItem.Kind.init)
             else { continue }
@@ -143,7 +159,6 @@ nonisolated enum ClipboardEncryptionMigration {
                     ? nil : Date(timeIntervalSince1970: sqlite3_column_double(read, 6)))
             guard ClipboardStore.bindAndInsert(write, item, cipher) else { return false }
         }
-        return true
     }
 
     private enum ImageOutcome {
@@ -194,7 +209,9 @@ nonisolated enum ClipboardEncryptionMigration {
                 destination, "INSERT OR IGNORE INTO item_text(item_id, text) VALUES(?1, ?2)", -1,
                 &write, nil) == SQLITE_OK
         else { return false }
-        while sqlite3_step(read) == SQLITE_ROW {
+        while true {
+            let status = sqlite3_step(read)
+            guard status == SQLITE_ROW else { return status == SQLITE_DONE }
             guard let idString = ClipboardStore.columnString(read, 0),
                 let id = UUID(uuidString: idString)
             else { continue }
@@ -212,12 +229,24 @@ nonisolated enum ClipboardEncryptionMigration {
             sqlite3_clear_bindings(write)
             guard done else { return false }
         }
-        return true
     }
 
     /// Every unsealed blob and thumbnail, all of them plaintext copies of history.
     private static func removePlaintext(in images: URL) {
         for url in plaintextFiles(in: images) { try? FileManager.default.removeItem(at: url) }
+    }
+
+    /// Only while no sealed store exists, when no row names any sealed blob.
+    private static func removeSealedLeftovers(in images: URL) {
+        guard ClipboardStore.isRealDirectory(images) else { return }
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: images.path)) ?? []
+        for name in names where name.hasSuffix("." + SealedFile.fileExtension) {
+            let url = images.appendingPathComponent(name)
+            guard (try? FileManager.default.attributesOfItem(atPath: url.path))?[.type]
+                as? FileAttributeType == .typeRegular
+            else { continue }
+            try? FileManager.default.removeItem(at: url)
+        }
     }
 
     /// Regular files only, in real folders only: a planted link must not aim this at other files.

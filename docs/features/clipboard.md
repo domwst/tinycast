@@ -43,8 +43,9 @@
   passes its own random key. Nothing defaults to a key, because a default would be a real one.
 - **An image capture keeps the generation from its pasteboard poll.** Clear History and store close
   retire it across conversion and file writing; a stale capture inserts nothing and leaves no blob.
-- A database that cannot be opened is deleted and recreated, and so is one of another
-  `schemaVersion` or sealed under another key, which its canary refuses. That is sound because a
+- A database that SQLite calls corrupt is deleted and recreated, and so is one of another
+  `schemaVersion` or sealed under another key, which its canary refuses. One that merely fails to
+  open, or whose canary can't be read just now, is kept and the store stays shut, with a HUD. That is sound because a
   history is captured rather than authored — `QuicklinkStore` deliberately does the opposite. It is
   **not** a licence to treat the file as disposable: it lives in Application Support precisely
   because nothing else can put it back. A Keychain that answers with an error rather than "no such
@@ -163,8 +164,9 @@ the observable `items` window; the off-main scan in [Search](#search) reaches ol
 may reclaim it at any time without telling the app, so a history kept there survives neither a restore
 nor a full disk — while the retention setting offers **Forever** and a pin is an explicit act.
 
-A database that won't open, or that `prepareSchema` refuses, is deleted and recreated (worst case the
-store degrades to session-only in-memory history).
+A database that `prepareSchema` refuses, corrupt or under another key, is deleted and recreated. One
+that only fails to open is kept, capture stays off, and a HUD says so, rather than record clips
+that would vanish at quit.
 
 Image capture (TIFF→PNG re-encode, seal and blob write) runs off the main actor via detached tasks;
 row inserts, resident search, and pruning stay on the main actor. A capture is
@@ -288,7 +290,9 @@ then removes the old file, renames the new one into place, and deletes the old P
 An image outside `images/` — an older release kept whatever path a `.rayconfig` named — is copied
 only if `RaycastImagePolicy` admits it, and never touched; a row naming any other file, a folder, a
 link or a file that is gone is dropped without reading it. An owned image that fails to seal stops the whole
-conversion, so its only copy is never deleted. Every step can be repeated after a crash, and
+conversion, so its only copy is never deleted, and so does a read that ends before the table does,
+a damaged page say: only `SQLITE_DONE` counts as converted. A conversion that keeps failing leaves
+Clear History an exit: it offers to discard the unconverted plaintext and start an empty history. Every step can be repeated after a crash, and
 leftover plaintext images keep it pending until a run removes them, capture on or off. A user who
 skips the release that carries it loses that history instead: the store refuses the old
 `user_version` and `load` deletes the unsealed files, so skipping it never leaves plaintext behind.

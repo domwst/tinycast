@@ -25,8 +25,9 @@ A backup carries five independently selectable categories, ticked on export and 
   on, since on records every copy, may stop `automaticallyCheckForUpdates` but never start it, may
   turn `quicklinkPassesSelectedText` off but never on, since on sends the selection to a site, and may raise `autoJoinConfirms` or `autoJoinNamedProvidersOnly`
   but never lower either, since lowering arms unattended joins.
-- **No absolute path may enter a `.tinycast`.** A clip's `imagePath` names a file on the Mac that wrote
-  it, so `BackupClipboardItem` carries a bundle-relative `imageName` instead. `backup-archive-test`
+- **No absolute path to a blob may enter a `.tinycast`.** A clip's `imagePath` names a file on the
+  Mac that wrote it, so `BackupClipboardItem` carries a bundle-relative `imageName` instead. A file
+  clip's own path is its content and does travel. `backup-archive-test`
   asserts the produced file contains neither `/Users` nor `/Library` — the analogue of
   `settings-backup-test`'s `snippetsEnabled` check, and for the same reason: this file gets sent to
   people.

@@ -18,7 +18,7 @@ nonisolated enum ClipboardKeyStore {
                     localized: "Clipboard history is locked: its key couldn't be read from the Keychain.")
             case .conversionFailed:
                 return String(
-                    localized: "Clipboard history couldn't be encrypted, so it stays closed for now.")
+                    localized: "Clipboard history couldn't be encrypted, so it stays closed. Clear History can discard it.")
             case .unreadable:
                 return String(
                     localized: "Clipboard history couldn't be read from disk, so it stays closed for now.")

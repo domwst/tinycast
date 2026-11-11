@@ -805,6 +805,10 @@ struct ClipboardTests {
             let stale = images.appendingPathComponent(".a.sealed.\(UUID().uuidString).partial")
             let fresh = images.appendingPathComponent(".b.sealed.\(UUID().uuidString).partial")
             let sealed = images.appendingPathComponent("kept.\(SealedFile.fileExtension)")
+            let orphan = images.appendingPathComponent("orphan.\(SealedFile.fileExtension)")
+            try SealedFile.write(Data("png".utf8), to: orphan, key: ClipboardCipher.harness.blobKey)
+            try FileManager.default.setAttributes(
+                [.modificationDate: Date().addingTimeInterval(-3_600)], ofItemAtPath: orphan.path)
             try Data("plaintext png".utf8).write(to: legacy)
             try Data("half".utf8).write(to: stale)
             try FileManager.default.setAttributes(
@@ -815,13 +819,14 @@ struct ClipboardTests {
             store.load()
             let exists = { (url: URL) in FileManager.default.fileExists(atPath: url.path) }
             let deadline = ContinuousClock.now.advanced(by: .seconds(3))
-            while exists(legacy) || exists(stale), ContinuousClock.now < deadline {
+            while exists(legacy) || exists(stale) || exists(orphan), ContinuousClock.now < deadline {
                 try await Task.sleep(for: .milliseconds(10))
             }
             expect(!exists(legacy), "a plaintext leftover in images/ is deleted on load")
             expect(!exists(stale), "as is a partial write older than any write takes")
             expect(exists(fresh), "a partial write still in flight is left to finish")
-            expect(exists(sealed), "and a sealed blob is kept")
+            expect(exists(sealed), "and a sealed blob is kept while it is new")
+            expect(!exists(orphan), "but one no row names goes once it is old, like a cut-short clear")
         }
     }
 
@@ -899,7 +904,7 @@ struct ClipboardTests {
 
             var streamed = 0
             var seen = Set<String>()
-            let unreadable = ClipboardStore.forEachStoredItem(
+            let unreadable = try? ClipboardStore.forEachStoredItem(
                 inDatabaseAt: store.dbURL, cipher: .harness
             ) { item in
                 streamed += 1
@@ -910,7 +915,7 @@ struct ClipboardTests {
             expect(unreadable == 0, "and every row opens under the store's own key")
 
             var foreign = 0
-            let refused = ClipboardStore.forEachStoredItem(
+            let refused = try? ClipboardStore.forEachStoredItem(
                 inDatabaseAt: store.dbURL, cipher: .other
             ) { _ in foreign += 1 }
             expect(foreign == 0, "another key reads no row back")

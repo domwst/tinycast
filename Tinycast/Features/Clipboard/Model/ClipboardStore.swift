@@ -420,7 +420,10 @@ final class ClipboardStore {
         items = loaded
         ImageDerivative.removeOrphans(in: imagesDir)
         let images = imagesDir
-        Task.detached(priority: .utility) { Self.removeUnsealedFiles(in: images) }
+        let referenced = referencedImagePaths()
+        Task.detached(priority: .utility) {
+            Self.removeUnsealedFiles(in: images, keeping: referenced)
+        }
         // Age passes while the app isn't running; insert-time pruning alone can't catch that.
         enforceLimits()
     }
@@ -1155,7 +1158,23 @@ final class ClipboardStore {
     }
 
     /// Anything in `images/` or its copies that isn't sealed is plaintext an older build left.
-    nonisolated private static func removeUnsealedFiles(in directory: URL) {
+    /// Every row's blob name, past the memory window too; nil when the read failed, so none go.
+    private func referencedImagePaths() -> Set<String>? {
+        guard let stmt = prepare("SELECT image_path FROM items WHERE image_path IS NOT NULL") else {
+            return nil
+        }
+        defer { sqlite3_finalize(stmt) }
+        var paths: Set<String> = []
+        while true {
+            let status = sqlite3_step(stmt)
+            guard status == SQLITE_ROW else { return status == SQLITE_DONE ? paths : nil }
+            // Names, not paths: `/var` and `/private/var` spell one folder two ways.
+            if let path = Self.columnString(stmt, 0) { paths.insert((path as NSString).lastPathComponent) }
+        }
+    }
+
+    /// A sealed blob no row names is a clear or capture a quit cut short, once it stops being new.
+    nonisolated private static func removeUnsealedFiles(in directory: URL, keeping referenced: Set<String>?) {
         guard isRealDirectory(directory) else { return }
         let keys: [URLResourceKey] = [.isRegularFileKey, .contentModificationDateKey]
         let stale = Date().addingTimeInterval(-60)
@@ -1175,6 +1194,11 @@ final class ClipboardStore {
                 }
             } else if url.pathExtension != SealedFile.fileExtension {
                 try? FileManager.default.removeItem(at: url)
+            } else if let referenced, !referenced.contains(name),
+                url.deletingLastPathComponent().lastPathComponent != thumbnails.lastPathComponent,
+                (values?.contentModificationDate ?? .distantFuture) < stale
+            {
+                try? FileManager.default.removeItem(at: url)
             }
         }
     }
@@ -1186,8 +1210,10 @@ final class ClipboardStore {
             sqlite3_open_v2(dbURL.path, &db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nil)
                 == SQLITE_OK
         else { return .failed }
+        // secure_delete: a cleared clip is ciphertext still, but its pages need not outlive it.
         let pragmas = sqlite3_exec(
-            db, "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;", nil, nil, nil)
+            db, "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA secure_delete=ON;", nil,
+            nil, nil)
         guard pragmas == SQLITE_OK else { return Self.isCorruption(pragmas) ? .refused : .failed }
         switch Self.prepareSchema(db, cipher: cipher) {
         case true?: break
@@ -1273,12 +1299,28 @@ final class ClipboardStore {
             }
             return true
         }
-        guard version == Int64(schemaVersion),
-            sqlite3_exec(db, schema, nil, nil, nil) == SQLITE_OK,
-            let canary = meta(db, key: "canary"),
-            cipher.open(canary, field: .canary, row: canaryRow) == canaryValue
-        else { return false }
-        return true
+        guard version == Int64(schemaVersion) else { return false }
+        let ensured = sqlite3_exec(db, schema, nil, nil, nil)
+        guard ensured == SQLITE_OK else { return isCorruption(ensured) ? false : nil }
+        return openCanaryOpens(db, cipher: cipher)
+    }
+
+    /// Only a missing canary, a wrong key or corruption is `false`; any other failure is nil.
+    nonisolated private static func openCanaryOpens(
+        _ db: OpaquePointer?, cipher: ClipboardCipher
+    ) -> Bool? {
+        var stmt: OpaquePointer?
+        let prepared = sqlite3_prepare_v2(
+            db, "SELECT value FROM meta WHERE key = 'canary'", -1, &stmt, nil)
+        defer { sqlite3_finalize(stmt) }
+        guard prepared == SQLITE_OK else { return isCorruption(prepared) ? false : nil }
+        switch sqlite3_step(stmt) {
+        case SQLITE_ROW:
+            guard let canary = columnData(stmt, 0) else { return false }
+            return cipher.open(canary, field: .canary, row: canaryRow) == canaryValue
+        case SQLITE_DONE: return false
+        case let code: return isCorruption(code) ? false : nil
+        }
     }
 
     nonisolated private static func intValue(_ db: OpaquePointer?, _ sql: String) -> Int64 {
@@ -1299,17 +1341,6 @@ final class ClipboardStore {
         sqlite3_bind_text(stmt, 1, key, -1, SQLITE_TRANSIENT)
         bind(value, to: stmt, at: 2)
         return sqlite3_step(stmt) == SQLITE_DONE
-    }
-
-    nonisolated private static func meta(_ db: OpaquePointer?, key: String) -> Data? {
-        var stmt: OpaquePointer?
-        guard
-            sqlite3_prepare_v2(db, "SELECT value FROM meta WHERE key = ?1", -1, &stmt, nil)
-                == SQLITE_OK
-        else { return nil }
-        defer { sqlite3_finalize(stmt) }
-        sqlite3_bind_text(stmt, 1, key, -1, SQLITE_TRANSIENT)
-        return sqlite3_step(stmt) == SQLITE_ROW ? columnData(stmt, 0) : nil
     }
 
     private func prepare(_ sql: String) -> OpaquePointer? {
@@ -1340,7 +1371,8 @@ final class ClipboardStore {
         cipher: ClipboardCipher, _ items: some Sequence<ClipboardItem>
     ) -> Int {
         var keys: Set<Int> = []
-        forEachStoredItem(inDatabaseAt: url, cipher: cipher) { keys.insert(importKey($0)) }
+        // Read short, the import skips fewer duplicates; it never loses an entry, so it goes on.
+        _ = try? forEachStoredItem(inDatabaseAt: url, cipher: cipher) { keys.insert(importKey($0)) }
 
         var db: OpaquePointer?
         guard sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK else {
@@ -1426,27 +1458,39 @@ final class ClipboardStore {
         return (try? SealedFile.write(data, to: URL(fileURLWithPath: destination), key: key)) != nil
     }
 
+    /// A history that stops short of its end, a damaged page say, is an error and never a total.
+    struct IncompleteRead: LocalizedError {
+        var errorDescription: String? {
+            String(localized: "Clipboard history couldn't be read to the end, so it wasn't backed up.")
+        }
+    }
+
     /// Past the memory window, off-main; counts rows that wouldn't open, for a backup to report.
     @discardableResult
     nonisolated static func forEachStoredItem(
         inDatabaseAt url: URL, cipher: ClipboardCipher, _ body: (ClipboardItem) -> Void
-    ) -> Int {
+    ) throws -> Int {
+        guard FileManager.default.fileExists(atPath: url.path) else { return 0 }
         var db: OpaquePointer?
         // `READWRITE` because a WAL reader still writes `-shm`.
         guard sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK else {
             sqlite3_close_v2(db)
-            return 0
+            throw IncompleteRead()
         }
         defer { sqlite3_close_v2(db) }
         var stmt: OpaquePointer?
         let sql = "SELECT \(columns) FROM items ORDER BY rowid"
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return 0 }
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { throw IncompleteRead() }
         defer { sqlite3_finalize(stmt) }
         var unreadable = 0
-        while sqlite3_step(stmt) == SQLITE_ROW {
+        while true {
+            let status = sqlite3_step(stmt)
+            guard status == SQLITE_ROW else {
+                guard status == SQLITE_DONE else { throw IncompleteRead() }
+                return unreadable
+            }
             if let item = row(stmt, cipher) { body(item) } else { unreadable += 1 }
         }
-        return unreadable
     }
 
     /// nil when a sealed field fails to open: a row under another key is unreadable, not empty.

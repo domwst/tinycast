@@ -1163,7 +1163,9 @@ struct PasteboardSnapshot {
         var items: [Item] = []
         for pasteboardItem in pasteboard.pasteboardItems ?? [] {
             var values: [(type: NSPasteboard.PasteboardType, data: Data)] = []
-            for type in pasteboardItem.types {
+            // A history image promises its file; reading it would write a plaintext export.
+            let ours = pasteboardItem.types.contains(ClipboardManager.internalType)
+            for type in pasteboardItem.types where !(ours && type == .fileURL) {
                 guard let data = pasteboardItem.data(forType: type) else { return nil }
                 values.append((type: type, data: data))
             }

@@ -169,9 +169,10 @@ struct ClipboardSearchTests {
         @MainActor
         init(_ store: ClipboardStore, active: Bool) {
             var stored: [ClipboardItem] = []
-            unreadable = ClipboardStore.forEachStoredItem(inDatabaseAt: store.dbURL, cipher: .harness) {
-                stored.append($0)
-            }
+            unreadable =
+                (try? ClipboardStore.forEachStoredItem(inDatabaseAt: store.dbURL, cipher: .harness) {
+                    stored.append($0)
+                }) ?? -1
             pins = store.items.filter(\.isPinned).sorted { $0.pinnedAt! < $1.pinnedAt! }
             window = store.items.filter { !$0.isPinned }
             let resident = Set(window.map(\.id))

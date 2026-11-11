@@ -36,6 +36,7 @@ struct ClipboardEncryptionMigrationTest {
         leavesASealedStoreAlone()
         await skippingTheReleaseLeaksNothing()
         aFailedSealKeepsTheOriginal()
+        aDamagedPageStopsTheConversion()
         cleanupResumesAfterTheSwap()
         onlyTheRightKeyOpensTheStore()
         imagesStayBoundToTheirRows()
@@ -319,6 +320,53 @@ struct ClipboardEncryptionMigrationTest {
             ClipboardEncryptionMigration.isPending(database: fixture.database, images: fixture.images))
     }
 
+    /// A read that ends early on a damaged page is not the end of the table, so nothing is lost.
+    static func aDamagedPageStopsTheConversion() {
+        let root = scratch()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let database = root.appendingPathComponent("clipboard.sqlite3")
+        let images = root.appendingPathComponent("images")
+        try? FileManager.default.createDirectory(at: images, withIntermediateDirectories: true)
+        var db: OpaquePointer?
+        sqlite3_open_v2(database.path, &db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nil)
+        sqlite3_exec(
+            db,
+            """
+            CREATE TABLE items(id TEXT NOT NULL UNIQUE, kind TEXT NOT NULL, text TEXT,
+              image_path TEXT, created_at REAL NOT NULL, source_app TEXT, pinned_at REAL);
+            BEGIN;
+            """, nil, nil, nil)
+        var stmt: OpaquePointer?
+        sqlite3_prepare_v2(
+            db, "INSERT INTO items(id, kind, text, created_at) VALUES(?, 'text', ?, ?)", -1, &stmt, nil)
+        let now = Date().timeIntervalSince1970
+        for index in 0..<3_000 {
+            sqlite3_bind_text(stmt, 1, UUID().uuidString, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_text(
+                stmt, 2, "clip \(index) " + String(repeating: "x", count: 200), -1, SQLITE_TRANSIENT)
+            sqlite3_bind_double(stmt, 3, now - 3_000 + Double(index))
+            sqlite3_step(stmt)
+            sqlite3_reset(stmt)
+        }
+        sqlite3_finalize(stmt)
+        sqlite3_exec(db, "COMMIT", nil, nil, nil)
+        sqlite3_close_v2(db)
+        // Zero one page in the middle of the table, the way a bad sector would.
+        let size = (try? FileManager.default.attributesOfItem(atPath: database.path))?[.size] as? Int ?? 0
+        if let handle = try? FileHandle(forWritingTo: database) {
+            try? handle.seek(toOffset: UInt64(size / 2 / 4_096 * 4_096))
+            try? handle.write(contentsOf: Data(count: 4_096))
+            try? handle.close()
+        }
+        let converted = ClipboardEncryptionMigration.run(
+            database: database, images: images, cipher: cipher, home: root)
+        check("a damaged page fails the conversion rather than ending it early", !converted)
+        check(
+            "and the original stays, unconverted, for another try",
+            FileManager.default.fileExists(atPath: database.path)
+                && !ClipboardEncryptionMigration.isSealedStore(database))
+    }
+
     /// A crash after the swap leaves old images; the next run, capture on or off, removes them.
     static func cleanupResumesAfterTheSwap() {
         let root = scratch()
@@ -397,14 +445,18 @@ struct ClipboardEncryptionMigrationTest {
         try? Data("keep".utf8).write(to: victim.appendingPathComponent("precious.txt"))
         let crafted = store.imagesDir.path + "/../victim"
         check("a traversal path is not an owned blob", !ClipboardStore.isOwnedBlob(crafted, in: store.imagesDir))
-        let old = Date().addingTimeInterval(-400 * 86_400)
+        // Recent, so the rows are still there for delete and clear to act on; prune comes after.
+        let recent = Date().addingTimeInterval(-60)
+        store.maxAge = .greatestFiniteMagnitude
         store.importEntries([
-            ClipboardItem(imagePath: crafted, createdAt: old, sourceBundleID: nil),
+            ClipboardItem(imagePath: crafted, createdAt: recent, sourceBundleID: nil),
             ClipboardItem(
-                imagePath: store.imagesDir.path + "/../victim/precious.txt", createdAt: old,
-                sourceBundleID: nil)
+                imagePath: store.imagesDir.path + "/../victim/precious.txt", createdAt: recent,
+                sourceBundleID: nil),
+            ClipboardItem(text: "kept", sourceBundleID: nil)
         ])
-        store.maxAge = 86_400
+        check("the rows arrive, so delete and clear have something to act on", store.items.count >= 2)
+        store.maxAge = 1
         store.enforceLimits()
         for item in store.items { store.remove(item) }
         store.clearAll()

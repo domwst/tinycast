@@ -56,8 +56,13 @@ final class ClipboardCoordinator {
     /// The key lives in the Keychain, read off-main, so the history opens a moment after launch.
     private func openHistory() async {
         guard let cipher = await historyCipher() else { return reportLocked() }
-        guard settings.clipboardEnabled, !clipboardStore.isOpen else { return }
-        clipboardStore.open(cipher: cipher)
+        guard settings.clipboardEnabled else { return }
+        // Already open for a write is still not capturing, so this carries on rather than returns.
+        if !clipboardStore.isOpen { clipboardStore.open(cipher: cipher) }
+        guard clipboardStore.isOpen else {
+            unlockFailure = .unreadable
+            return reportLocked()
+        }
         clipboardStore.maxAge = settings.clipboardRetention.maxAge
         clipboardStore.onSearchResultsChanged = { [weak self] query, previous, current in
             self?.followSearchResults(query: query, previous: previous, current: current)
@@ -90,7 +95,8 @@ final class ClipboardCoordinator {
             }
         unlocking = task
         let outcome = await task.value
-        unlocking = nil
+        // A newer unlock may have started while this one waited, and its registration stays.
+        if unlocking == task { unlocking = nil }
         switch outcome {
         case .ready(let cipher):
             unlockFailure = nil
@@ -108,6 +114,8 @@ final class ClipboardCoordinator {
             return false
         }
         clipboardStore.open(cipher: cipher)
+        // A write with capture off would otherwise prune by the store's default, not the setting.
+        clipboardStore.maxAge = settings.clipboardRetention.maxAge
         return clipboardStore.isOpen
     }
 
@@ -231,10 +239,34 @@ final class ClipboardCoordinator {
     /// Reachable with the feature off, so what was kept before can still be erased afterwards.
     func clearHistory() {
         Task {
-            guard await openForWrite() else { return }
-            if !clipboardStore.clearAll() { reportBusy() }
+            if await openForWrite() {
+                if !clipboardStore.clearAll() { reportBusy() }
+            } else if unlockFailure == .conversionFailed {
+                await offerToDiscardUnconverted()
+            }
             closeIfDisabled()
         }
+    }
+
+    /// A history that will never encrypt would otherwise sit on disk in plaintext for good.
+    private func offerToDiscardUnconverted() async {
+        guard
+            await core.confirm(
+                title: String(localized: "Discard the unencrypted clipboard history?"),
+                message: String(
+                    localized: """
+                        Tinycast couldn't encrypt it, so it can't be opened and stays on disk \
+                        unencrypted. Discarding deletes it and starts an empty, encrypted history.
+                        """),
+                symbol: "trash", confirmTitle: String(localized: "Discard"))
+        else { return }
+        let database = clipboardStore.dbURL
+        let images = clipboardStore.imagesDir
+        await Task.detached(priority: .userInitiated) {
+            ClipboardEncryptionMigration.discardUnconverted(database: database, images: images)
+        }.value
+        unlockFailure = nil
+        if settings.clipboardEnabled { await openHistory() }
     }
 
     func removeClip(_ item: ClipboardItem) {

@@ -35922,54 +35922,54 @@
         }
       }
     },
-    "Clipboard history couldn't be encrypted, so it stays closed for now." : {
+    "Clipboard history couldn't be encrypted, so it stays closed. Clear History can discard it." : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Der Zwischenablageverlauf konnte nicht verschlüsselt werden und bleibt vorerst geschlossen."
+            "value" : "Der Zwischenablageverlauf konnte nicht verschlüsselt werden und bleibt deshalb geschlossen. „Verlauf löschen“ kann ihn verwerfen."
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "No se pudo cifrar el historial del portapapeles, así que permanece cerrado por ahora."
+            "value" : "No se pudo cifrar el historial del portapapeles, así que sigue cerrado. Borrar historial puede descartarlo."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "L’historique du presse-papiers n’a pas pu être chiffré ; il reste fermé pour le moment."
+            "value" : "L’historique du presse-papiers n’a pas pu être chiffré, il reste donc fermé. Effacer l’historique peut le supprimer."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "クリップボード履歴を暗号化できなかったため、今は閉じたままです。"
+            "value" : "クリップボード履歴を暗号化できなかったため、閉じたままです。「履歴を消去」で破棄できます。"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "클립보드 기록을 암호화할 수 없어 당분간 닫힌 상태로 유지됩니다."
+            "value" : "클립보드 기록을 암호화할 수 없어 닫힌 상태로 유지됩니다. 기록 지우기로 버릴 수 있습니다."
           }
         },
         "pt" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Não foi possível criptografar o histórico da área de transferência, então ele fica fechado por enquanto."
+            "value" : "Não foi possível criptografar o histórico da área de transferência, então ele continua fechado. Limpar histórico pode descartá-lo."
           }
         },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Не удалось зашифровать историю буфера обмена, поэтому пока она остаётся закрытой."
+            "value" : "Не удалось зашифровать историю буфера обмена, поэтому она остаётся закрытой. «Очистить историю» может её удалить."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "无法加密剪贴板历史记录，因此暂时保持关闭。"
+            "value" : "无法加密剪贴板历史，因此它保持关闭。“清除历史记录”可以将其丢弃。"
           }
         }
       }
@@ -36022,6 +36022,58 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "无法从磁盘读取剪贴板历史记录，因此暂时保持关闭。"
+          }
+        }
+      }
+    },
+    "Clipboard history couldn't be read to the end, so it wasn't backed up." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Zwischenablageverlauf konnte nicht bis zum Ende gelesen werden und wurde deshalb nicht gesichert."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No se pudo leer el historial del portapapeles hasta el final, así que no se incluyó en la copia de seguridad."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "L’historique du presse-papiers n’a pas pu être lu jusqu’au bout, il n’a donc pas été sauvegardé."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "クリップボード履歴を最後まで読み取れなかったため、バックアップされませんでした。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "클립보드 기록을 끝까지 읽을 수 없어 백업하지 않았습니다."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Não foi possível ler o histórico da área de transferência até o fim, então ele não foi incluído no backup."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Не удалось прочитать историю буфера обмена до конца, поэтому она не попала в резервную копию."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法完整读取剪贴板历史，因此未备份。"
           }
         }
       }
@@ -48291,6 +48343,110 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "停用此功能及其相关快捷键。"
+          }
+        }
+      }
+    },
+    "Discard" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verwerfen"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Descartar"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Supprimer"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "破棄"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "버리기"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Descartar"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Удалить"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "丢弃"
+          }
+        }
+      }
+    },
+    "Discard the unencrypted clipboard history?" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unverschlüsselten Zwischenablageverlauf verwerfen?"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "¿Descartar el historial del portapapeles sin cifrar?"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Supprimer l’historique du presse-papiers non chiffré ?"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暗号化されていないクリップボード履歴を破棄しますか？"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "암호화되지 않은 클립보드 기록을 버리시겠습니까?"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Descartar o histórico não criptografado da área de transferência?"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Удалить незашифрованную историю буфера обмена?"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "要丢弃未加密的剪贴板历史吗？"
           }
         }
       }
@@ -129705,6 +129861,58 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Tinycast 无法写入专用图片附件。"
+          }
+        }
+      }
+    },
+    "Tinycast couldn't encrypt it, so it can't be opened and stays on disk unencrypted. Discarding deletes it and starts an empty, encrypted history." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tinycast konnte ihn nicht verschlüsseln. Er lässt sich daher nicht öffnen und bleibt unverschlüsselt auf der Festplatte. Beim Verwerfen wird er gelöscht und ein leerer, verschlüsselter Verlauf begonnen."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tinycast no pudo cifrarlo, así que no se puede abrir y sigue en el disco sin cifrar. Al descartarlo se elimina y se empieza un historial vacío y cifrado."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tinycast n’a pas pu le chiffrer : il ne peut pas être ouvert et reste sur le disque sans chiffrement. Le supprimer l’efface et démarre un historique vide et chiffré."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tinycast はこの履歴を暗号化できなかったため、開くことができず、暗号化されないままディスクに残っています。破棄すると削除され、空の暗号化された履歴が始まります。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tinycast가 이 기록을 암호화할 수 없어 열 수 없으며 암호화되지 않은 채 디스크에 남아 있습니다. 버리면 삭제되고 비어 있는 암호화된 기록이 새로 시작됩니다."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O Tinycast não conseguiu criptografá-lo, então ele não pode ser aberto e continua no disco sem criptografia. Descartar o exclui e começa um histórico vazio e criptografado."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tinycast не удалось её зашифровать, поэтому её нельзя открыть и она остаётся на диске незашифрованной. Удаление стирает её и начинает пустую зашифрованную историю."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tinycast 无法加密它，因此无法打开，并以未加密的形式留在磁盘上。丢弃会将其删除，并开始一个空的加密历史。"
           }
         }
       }

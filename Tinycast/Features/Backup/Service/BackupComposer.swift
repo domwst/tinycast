@@ -97,7 +97,7 @@ enum BackupComposer {
         var written = 0
         var missing = 0
         var failure: Error?
-        let unreadable = ClipboardStore.forEachStoredItem(
+        let unreadable = try ClipboardStore.forEachStoredItem(
             inDatabaseAt: database, cipher: cipher
         ) { item in
             guard failure == nil else { return }
