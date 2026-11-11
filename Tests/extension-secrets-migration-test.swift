@@ -120,6 +120,21 @@ struct ExtensionSecretsMigrationTests {
                 && !fileText("locked", in: data).contains(marker),
             "and the next launch finishes the move")
 
+        let formVault = MemoryVault()
+        let forms = ExtensionStorage(directory: data, vault: formVault.vault)
+        forms.setFormValues(
+            extension: "sample", command: "login", values: ["user": "me", "password": "pw-\(marker)"])
+        forms.flush()
+        ExtensionSecretsMigration.sealRememberedPasswords(
+            storage: forms, command: ExtensionCommandRef(extensionName: "sample", commandName: "login"),
+            fields: ["password"])
+        forms.flush()
+        expect(
+            formVault.items["sample"]?["form:login:password"] == "pw-\(marker)"
+                && !fileText("sample", in: data).contains("pw-\(marker)")
+                && fileText("sample", in: data).contains("\"me\""),
+            "a form password an older build remembered moves once its form shows it is one")
+
         print(failures == 0 ? "\nALL PASSED" : "\n\(failures) FAILED")
         exit(failures == 0 ? 0 : 1)
     }

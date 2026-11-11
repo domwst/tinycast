@@ -83,6 +83,11 @@ struct AIConnectionEditorPanel: View {
                         .focused($baseURLFocused)
                         .onSubmit(commitBaseURL)
                     }
+                    if !baseURLCommitted {
+                        Text("Press Return to look up this address's models.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                     editorField("API Key") {
                         RevealableSecureField(
                             title: String(localized: "API Key"), text: $key,

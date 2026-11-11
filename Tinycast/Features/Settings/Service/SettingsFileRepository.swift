@@ -35,6 +35,7 @@ final class SettingsFileRepository {
 
     /// Follows both sides from here on; `importing` applies the file first, else it is replaced.
     func start(importing: Bool) {
+        tightenPermissions()
         if importing, FileManager.default.fileExists(atPath: fileURL.path) {
             let data = try? Data(contentsOf: fileURL)
             lastSeen = data
@@ -120,19 +121,45 @@ final class SettingsFileRepository {
     /// Atomic, and into a symlink's target, so a link into a dotfiles repository stays a link.
     private func write(_ data: Data) -> Bool {
         let target = fileURL.resolvingSymlinksInPath()
+        let folder = target.deletingLastPathComponent()
+        let partial = folder.appendingPathComponent(".\(target.lastPathComponent).\(UUID().uuidString)")
         do {
             try FileManager.default.createDirectory(
-                at: target.deletingLastPathComponent(), withIntermediateDirectories: true,
-                attributes: [.posixPermissions: 0o700])
-            try data.write(to: target, options: .atomic)
-            // A home folder is group-readable on macOS, and other accounts have no business here.
-            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: target.path)
+                at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            // Born 0600, never chmodded after: a home folder is readable by every other account.
+            let descriptor = open(partial.path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0o600)
+            guard descriptor >= 0 else { return false }
+            let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+            try handle.write(contentsOf: data)
+            try handle.close()
+            guard rename(partial.path, target.path) == 0 else {
+                try? FileManager.default.removeItem(at: partial)
+                return false
+            }
         } catch {
+            try? FileManager.default.removeItem(at: partial)
             return false
         }
         lastSeen = data
         baseline = data
         return true
+    }
+
+    /// A file and folder an older build made at 0644 and 0755; a folder that's a link isn't ours.
+    private func tightenPermissions() {
+        let folder = fileURL.deletingLastPathComponent()
+        let attributes = try? FileManager.default.attributesOfItem(atPath: folder.path)
+        if attributes?[.type] as? FileAttributeType == .typeDirectory { Self.revokeOthers(at: folder) }
+        Self.revokeOthers(at: fileURL.resolvingSymlinksInPath())
+    }
+
+    /// Group and other bits only: the owner's own choice, even an unreadable 000, stays.
+    private static func revokeOthers(at url: URL) {
+        let manager = FileManager.default
+        guard let mode = (try? manager.attributesOfItem(atPath: url.path))?[.posixPermissions] as? Int,
+            mode & 0o077 != 0
+        else { return }
+        try? manager.setAttributes([.posixPermissions: mode & ~0o077], ofItemAtPath: url.path)
     }
 
     private func report(_ issues: [SettingsFileIssue]) {

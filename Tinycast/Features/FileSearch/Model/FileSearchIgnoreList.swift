@@ -6,14 +6,15 @@ struct FileSearchIgnoreList: Sendable, Equatable {
     /// Compiled in, not stored, so changing the shipped rules reaches existing installs.
     static let defaults = [
         "node_modules", ".git", ".build", "build", "dist", "target", "DerivedData", "Pods", ".next",
-        ".venv", "*.photoslibrary", "~/.Trash", "~/.cache", "~/.npm", "~/Library/Application Support",
-        "~/Library/Caches", "~/Library/Containers", "~/Library/Developer", "~/Library/Group Containers",
-        "~/Library/Mail", "/Library/Caches", "/private/var/folders"
+        ".venv", "*.photoslibrary", "~/.cache", "~/.npm", "~/Library/Caches", "~/Library/Developer",
+        "/Library/Caches", "/private/var/folders"
     ]
 
     /// Never listed and never removable: settings can't hand out what Full Disk Access guards.
     static let privacyProtected = [
-        "/System/Volumes/Data", "~/Library/Messages", "~/Library/Safari", "~/Library/Calendars", "~/Library/Reminders",
+        "/System/Volumes/Data", "~/.Trash", "~/Library/Application Support", "~/Library/Containers",
+        "~/Library/Group Containers", "~/Library/Mail",
+        "~/Library/Messages", "~/Library/Safari", "~/Library/Calendars", "~/Library/Reminders",
         "~/Library/Cookies", "~/Library/HomeKit", "~/Library/IdentityServices", "~/Library/Metadata",
         "~/Library/Suggestions", "~/Library/Biome", "~/Library/Accounts", "~/Library/Daemon Containers",
         "~/Library/Sharing", "~/Library/PersonalizationPortrait", "~/Library/Autosave Information"

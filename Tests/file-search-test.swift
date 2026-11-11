@@ -183,17 +183,18 @@ struct FileSearchTests {
         for name in FileSearchIgnoreList.defaults where !name.contains("/") {
             expect(shipped.excludes(name: name, path: "/x/\(name)"), "\(name) is skipped")
         }
-        for path in [
-            "/Users/test/.Trash", "/Users/test/Library/Caches", "/Users/test/Library/Containers",
-            "/Users/test/Library/Application Support", "/Library/Caches", "/private/var/folders"
-        ] {
+        for path in ["/Users/test/Library/Caches", "/Library/Caches", "/private/var/folders"] {
             expect(
                 shipped.excludes(name: URL(filePath: path).lastPathComponent, path: path),
                 "\(path) is skipped")
         }
         // No patterns at all, as if every default were removed: the protected list still applies.
         let protected = FileSearchPolicy(scopes: ["~"], ignorePatterns: [], homeDirectory: home)
-        for path in ["/Users/test/Library/Messages", "/Users/test/Library/Safari", "/System/Volumes/Data"] {
+        for path in [
+            "/Users/test/Library/Messages", "/Users/test/Library/Safari", "/System/Volumes/Data",
+            "/Users/test/Library/Mail", "/Users/test/.Trash", "/Users/test/Library/Containers",
+            "/Users/test/Library/Group Containers", "/Users/test/Library/Application Support"
+        ] {
             expect(
                 protected.ignore.excludes(name: URL(filePath: path).lastPathComponent, path: path),
                 "\(path) is skipped, so the index never lists what Full Disk Access guards")

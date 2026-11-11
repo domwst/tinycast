@@ -1,7 +1,7 @@
 # Updates
 
-By default, Tinycast checks GitHub Releases once a day and offers the newest release for its own
-channel in a pill in the palette, then installs it at the next relaunch or quit. There is no Sparkle
+Once automatic checks are turned on (they start off), Tinycast checks GitHub Releases once a day and
+offers the newest release for its own channel in a pill in the palette, then installs it at the next relaunch or quit. There is no Sparkle
 and no appcast: the release feed the website already reads is the feed the app reads.
 
 ## Invariants
@@ -65,7 +65,7 @@ uninstall` and `brew list` keep working unchanged.
 - **Only `UpdatePill` reads `stage`.** It stands alone in the footer and the compact header, so a
   download tick never re-renders the palette around it.
 - **Automatic checking is optional; manual checking stays available.** Settings → General →
-  Automatically check for updates defaults on. Turning it off stops the background task and any
+  Automatically check for updates defaults off. Turning it off stops the background task and any
   in-flight automatic request, so neither a response nor a cached release can make a new offer.
   The preference travels through settings backups and `general.automaticallyCheckForUpdates` in
   settings.json; release metadata stays in the feature's own cache file.
@@ -90,13 +90,15 @@ the header row. It cannot reuse `ExtensionToastPill`, because extension views st
 
 ## Channel and version
 
-`ReleaseChannel` is derived from the bundle id, and nothing else:
+`ReleaseChannel` is derived from the bundle id, unless `TinycastPackagedBy` names a package
+manager, which makes any build `.packaged`:
 
 | Bundle id               | Channel        | Takes       |
 | ----------------------- | -------------- | ----------- |
 | `com.tinycast.app`      | `.stable`      | releases    |
 | `com.tinycast.app.beta` | `.beta`        | prereleases |
 | anything else           | `.development` | nothing     |
+| any, packaged           | `.packaged`    | nothing     |
 
 `AppVersion` parses `MAJOR.MINOR.PATCH` and `MAJOR.MINOR.PATCH-beta.N` with semver precedence: a
 prerelease sorts below the release it leads to, and `beta.10` above `beta.9`. Everything else parses
@@ -168,8 +170,9 @@ setting, clipboard entry, note or snippet is affected by an update, by `brew upg
 
 ## Releasing into it
 
-`.github/workflows/release.yml` publishes two assets from one build: the DMG people download by hand
-and the cask installs, and `Tinycast-<version>.zip` for the updater. A stable run adds a
+`.github/workflows/release.yml` publishes three assets from one build: the DMG people download by
+hand and the cask installs, `Tinycast-<version>.zip` for the updater, and its `.sig`, which the
+updater requires. A stable run adds a
 `Tinycast-Universal-<version>` pair from its `universal` job, uploaded second so the thin zip stays
 first in the asset list — builds predating architecture-aware selection take whichever comes first.
 The zip is made with

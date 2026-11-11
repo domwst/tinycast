@@ -58,14 +58,23 @@ in
   config = lib.mkIf cfg.enable {
     environment.systemPackages = lib.mkIf (cfg.signing == null) [ cfg.package ];
 
-    system.activationScripts.postActivation.text = lib.mkIf (cfg.signing != null) ''
-      echo "installing Tinycast..." >&2
-      ${pkgs.bash}/bin/bash ${./install-signed.sh} \
-        ${lib.escapeShellArg "${cfg.package}/Applications/Tinycast.app"} \
-        ${lib.escapeShellArg config.system.primaryUser} \
-        ${lib.escapeShellArg cfg.signing.identity} \
-        ${lib.escapeShellArg keychain} \
-        || echo "warning: Tinycast was not installed or updated; see docs/signing.md in its repo" >&2
-    '';
+    system.activationScripts.postActivation.text =
+      if cfg.signing != null then
+        ''
+          echo "installing Tinycast..." >&2
+          ${pkgs.bash}/bin/bash ${./install-signed.sh} \
+            ${lib.escapeShellArg "${cfg.package}/Applications/Tinycast.app"} \
+            ${lib.escapeShellArg config.system.primaryUser} \
+            ${lib.escapeShellArg cfg.signing.identity} \
+            ${lib.escapeShellArg keychain} \
+            || echo "warning: Tinycast was not installed or updated; see docs/signing.md in its repo" >&2
+        ''
+      else
+        # A copy an earlier signed install left would sit beside the one in /Applications/Nix Apps.
+        ''
+          if [ -f /var/db/tinycast-nix/.tinycast-installed-from ]; then
+            rm -rf /Applications/Tinycast.app /var/db/tinycast-nix
+          fi
+        '';
   };
 }

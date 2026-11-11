@@ -169,9 +169,11 @@ somewhere on another; `/` is shown as the startup volume's name. The helper reso
 | contains `/`, or starts with `~/` | the whole absolute path, via `fnmatch` | `~/Movies`, `**/[Cc]ache/**` |
 
 The defaults skip what a search for one's own files never wants: build output and dependency
-folders (`node_modules`, `.git`, `build`, `DerivedData`, `.venv`, …), the Photos library, the Trash,
-the `~/.cache` and `~/.npm` caches, and the noisy parts of `~/Library` — `Application Support`,
-`Caches`, `Containers`, `Developer`, `Group Containers` and `Mail`. Together they hold most of a home
+folders (`node_modules`, `.git`, `build`, `DerivedData`, `.venv`, …), the Photos library, the
+`~/.cache` and `~/.npm` caches, and `~/Library/Caches` and `~/Library/Developer`. The Trash,
+`Application Support`, `Containers`, `Group Containers` and `Mail` are in
+`FileSearchIgnoreList.privacyProtected` instead, with the other stores Full Disk Access guards, so no
+setting can bring them into the index. Together they hold most of a home
 folder's entries and most of its churn: one browser's cache alone rewrites tens of thousands of files
 on every page load. `Preferences`, `LaunchAgents` and the cloud drives stay indexed. `/Library/Caches`
 and `/private/var/folders` cover a scope added outside home.

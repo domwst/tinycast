@@ -18,8 +18,10 @@ camera preview, and individual events as searchable launcher entries.
   already-joined set rather than reading a clock of its own.
 - **Auto join opens only what you said yes to.** `MeetingEvent.isAccepted` is true for an event you
   accepted, organized, or that has no attendees, and `AutoJoinPolicy` drops every other one before
-  the pick, so a stranger's invite added to your calendar never opens itself. Its confirmation
-  names the host the link opens, so a title can't pass for a call it isn't.
+  the pick, so a stranger's invite added to your calendar never opens itself. That also skips a
+  tentative reply, and a meeting that reached you through a mailing list or a shared calendar
+  without naming you; the card still offers them. Its confirmation, or the camera preview standing
+  in for it, names the host the link opens, so a title can't pass for a call it isn't.
 - **The camera settles before the panel opens, and stops after it closes.**
   `CameraSession.start()` resolves access and blocks on `startRunning` first, then hands
   `CameraPreviewController` a settled `Feed` — so the panel's first frame is live video rather than a

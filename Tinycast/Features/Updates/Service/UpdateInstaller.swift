@@ -123,11 +123,12 @@ struct UpdateInstaller: Sendable {
     /// The old copy goes back only if it is still the one that ran; else nothing unverified stays.
     private func rollBack(_ installed: URL, to backup: URL, expecting staged: Staged) {
         let fileManager = FileManager.default
-        if BundleSignature.trustedHash(of: backup, requirement: staged.requirement) == staged.runningHash,
-            (try? fileManager.replaceItemAt(installed, withItemAt: backup, options: .usingNewMetadataOnly))
-                != nil
-        {
-            return
+        if BundleSignature.trustedHash(of: backup, requirement: staged.requirement) == staged.runningHash {
+            // A nil URL is still a completed swap; only a thrown error means it didn't go back.
+            do {
+                _ = try fileManager.replaceItemAt(installed, withItemAt: backup, options: .usingNewMetadataOnly)
+                return
+            } catch {}
         }
         try? fileManager.trashItem(at: installed, resultingItemURL: nil)
         try? fileManager.removeItem(at: backup)

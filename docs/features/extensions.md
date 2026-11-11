@@ -46,7 +46,9 @@ produces, rendered natively into the palette. No Electron, no browser, no Node.j
   per extension under the `extension-secrets` scope, named from the exact manifest name so `@linear`
   and `linear` never share one. The host finds password fields in the rendered
   tree (`RenderTree.passwordFieldIDs`). A password left in the file by an older build is never read
-  as one, and its token sets stay in the file's `oauthTokens` until the migration has moved them.
+  as one, its token sets stay in the file's `oauthTokens` until the migration has moved them, and a
+  remembered form password moves to the vault the first time its form renders. A fresh install of a
+  name that isn't installed now clears the vault first, so it never inherits a removed one's tokens.
 - **A name never leaves its folder.** `ExtensionManifest` drops a manifest whose name, flattened by
   `safeName` or as installed, is empty, hidden or `..`, and any command named that way or with a
   `/`. A store download must carry the manifest name of the listing it was fetched for.

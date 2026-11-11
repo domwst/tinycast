@@ -328,6 +328,9 @@ final class AppIndex {
     private(set) var apps: [AppEntry] = []
     private var searchEntries: [AppEntry] = []
 
+    /// Every application found, a second copy of one included, which `apps` folds away.
+    var installedApplications: [AppEntry] { searchEntries.filter { $0.kind == .application } }
+
     private var snippetEntries: [AppEntry] = []
 
     /// The launcher's rows in order, with the size of each leading section at their head.

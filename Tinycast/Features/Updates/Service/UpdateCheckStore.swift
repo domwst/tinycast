@@ -32,9 +32,7 @@ final class UpdateCheckStore {
     @ObservationIgnored private var pump: Task<Void, Never>?
 
     init(
-        channel: ReleaseChannel = ReleaseChannel(
-            bundleID: Bundle.main.bundleIdentifier,
-            packagedBy: Bundle.main.object(forInfoDictionaryKey: "TinycastPackagedBy") as? String),
+        channel: ReleaseChannel = ReleaseChannel.running,
         runningVersion: AppVersion? = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String)
             .flatMap(AppVersion.init),
         fileURL: URL = AppPaths.caches().appendingPathComponent("update-check.json"),
@@ -160,5 +158,14 @@ final class UpdateCheckStore {
             let http = response as? HTTPURLResponse, http.statusCode == 200
         else { return nil }
         return data
+    }
+}
+
+extension ReleaseChannel {
+    /// This copy's own channel, from its bundle ID and any package manager that installed it.
+    static var running: ReleaseChannel {
+        ReleaseChannel(
+            bundleID: Bundle.main.bundleIdentifier,
+            packagedBy: Bundle.main.object(forInfoDictionaryKey: "TinycastPackagedBy") as? String)
     }
 }

@@ -41,7 +41,23 @@ struct UninstallCoordinatorTests {
                 expect(!session.isTrashing, "success, refusal and cancellation release the busy state")
             }
         }
+        sharedCopiesReachTheIdentityCheck()
         print("ALL PASSED")
+    }
+
+    /// `apps` holds one copy per bundle ID; the other copy is what marks shared data as shared.
+    private static func sharedCopiesReachTheIdentityCheck() {
+        let session = UninstallSession()
+        let coordinator = UninstallCoordinator(
+            session: session, palette: PaletteState(), paletteCoordinator: PaletteCoordinator(),
+            appIndex: AppIndex(installedApplications: [AppEntry(), AppEntry(id: "copy")]),
+            runningApps: RunningAppsMonitor(), hotKeys: HotKeyManager(), favorites: FavoritesStore(),
+            visibility: VisibilityStore(), ranking: LauncherRankingStore(), aliases: AliasStore(),
+            core: AppCore())
+        coordinator.beginUninstall(AppEntry())
+        expect(
+            session.otherBundleIDs == ["com.tinycast.uninstall-fixture"],
+            "a second copy carrying the same bundle ID reaches the identity check")
     }
 
     private static func expect(_ condition: Bool, _ message: String) {
@@ -55,7 +71,7 @@ struct UninstallCoordinatorTests {
 // Platform effects are recorded so the shipped coordinator cannot touch installed apps or files.
 struct AppEntry {
     enum Kind { case application }
-    let id = "fixture"
+    var id = "fixture"
     let name = "Fixture"
     let url = URL(fileURLWithPath: "/Applications/Fixture.app")
     let bundleID: String? = "com.tinycast.uninstall-fixture"
@@ -80,7 +96,10 @@ final class UninstallSession {
             evidence: .bundle, isDirectory: true, size: .zero, protection: .removable)
     ]
 
-    func begin(app: AppEntry, otherAppNames: [String], otherBundleIDs: [String], isRunning: Bool) {}
+    var otherBundleIDs: [String] = []
+    func begin(app: AppEntry, otherAppNames: [String], otherBundleIDs: [String], isRunning: Bool) {
+        self.otherBundleIDs = otherBundleIDs
+    }
     func setTrashing(_ value: Bool) { isTrashing = value }
 }
 
@@ -156,6 +175,7 @@ struct PaletteCoordinator {
 
 struct AppIndex {
     let apps: [AppEntry] = []
+    var installedApplications: [AppEntry] = []
     func refresh() async {}
 }
 

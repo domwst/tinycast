@@ -128,9 +128,10 @@ final class MCPHTTPTransport: MCPTransport {
     }
 
     /// A body past this is no reply worth reading, and holding it whole would exhaust memory first.
-    private static let bodyLimit = 16 * 1_048_576
+    nonisolated private static let bodyLimit = 16 * 1_048_576
 
-    private static func receive(
+    /// Off the main actor: a byte at a time there costs an executor hop each, seconds a megabyte.
+    @concurrent nonisolated private static func receive(
         _ request: URLRequest, on session: URLSession
     ) async throws -> (Data, URLResponse) {
         let (bytes, response) = try await session.bytes(for: request)

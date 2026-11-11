@@ -95159,6 +95159,58 @@
         }
       }
     },
+    "Press Return to look up this address's models." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Drücke den Zeilenschalter, um die Modelle dieser Adresse abzurufen."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pulsa Retorno para buscar los modelos de esta dirección."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Appuyez sur Retour pour rechercher les modèles de cette adresse."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このアドレスのモデルを調べるには Return キーを押してください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 주소의 모델을 조회하려면 Return 키를 누르세요."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pressione Return para buscar os modelos deste endereço."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Нажмите Return, чтобы найти модели по этому адресу."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按 Return 键查询此地址的模型。"
+          }
+        }
+      }
+    },
     "Press Tab to ask Quick AI" : {
       "localizations" : {
         "de" : {

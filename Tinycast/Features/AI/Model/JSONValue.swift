@@ -66,8 +66,11 @@ enum JSONValue: Equatable, Sendable {
         return value
     }
 
+    /// nil past `Int`'s range, where `Int(_:)` would trap on a number a server chose.
     var intValue: Int? {
-        guard case .number(let value) = self else { return nil }
+        guard case .number(let value) = self, value.isFinite,
+            value >= -9.223_372_036_854_775e18, value < 9.223_372_036_854_775e18
+        else { return nil }
         return Int(value)
     }
 }

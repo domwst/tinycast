@@ -163,6 +163,19 @@ final class ExtensionStorage {
             extension: name)
     }
 
+    /// Values these fields have in the file move to the vault; the file keeps any it refuses.
+    func moveFormValuesToVault(extension name: String, command: String, fields: Set<String>) {
+        let plain = (store(for: name).formValues[command] ?? [:]).filter { fields.contains($0.key) }
+        guard !plain.isEmpty,
+            setSecrets(
+                Dictionary(uniqueKeysWithValues: plain.map {
+                    (Self.formKey(command: command, field: $0.key), $0.value)
+                }),
+                extension: name)
+        else { return }
+        mutate(name) { store in plain.keys.forEach { store.formValues[command]?.removeValue(forKey: $0) } }
+    }
+
     private static func formKey(command: String, field: String) -> String {
         "form:\(command):\(field)"
     }

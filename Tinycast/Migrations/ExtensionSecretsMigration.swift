@@ -25,4 +25,13 @@ enum ExtensionSecretsMigration {
         }
         storage.flush()
     }
+
+    /// A form's password fields are known only once it renders, so its old values move then.
+    static func sealRememberedPasswords(
+        storage: ExtensionStorage, command: ExtensionCommandRef, fields: Set<String>
+    ) {
+        guard !fields.isEmpty else { return }
+        storage.moveFormValuesToVault(
+            extension: command.extensionName, command: command.commandName, fields: fields)
+    }
 }

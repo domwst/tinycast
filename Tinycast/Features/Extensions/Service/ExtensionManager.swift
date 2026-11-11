@@ -233,7 +233,9 @@ final class ExtensionManager: ExtensionRuntimeDelegate, ExtensionHostContext {
     // MARK: - Install / uninstall
 
     func install(from source: URL) async throws {
-        untrack(try ExtensionCatalog.install(from: source).manifest.name)
+        let name = try ExtensionCatalog.install(from: source).manifest.name
+        forgetLeftoverSecrets(of: name)
+        untrack(name)
         await refresh()
     }
 
@@ -266,6 +268,7 @@ final class ExtensionManager: ExtensionRuntimeDelegate, ExtensionHostContext {
         let installer = ExtensionInstaller(
             packageManager: packageManager, additionalSearchPaths: additionalSearchPaths)
         let installed = try await installer.install(source, onProgress: onProgress)
+        forgetLeftoverSecrets(of: installed.manifest.name)
         untrack(installed.manifest.name)
         await refresh()
         return installed
@@ -280,6 +283,7 @@ final class ExtensionManager: ExtensionRuntimeDelegate, ExtensionHostContext {
         for (index, candidate) in candidates.enumerated() {
             do {
                 let name = try ExtensionCatalog.install(from: candidate.directory).manifest.name
+                forgetLeftoverSecrets(of: name)
                 storeVersions.record(nil, for: name)
                 updates[name] = nil
             } catch {
@@ -338,8 +342,15 @@ final class ExtensionManager: ExtensionRuntimeDelegate, ExtensionHostContext {
         onProgress: @Sendable @escaping (ExtensionInstaller.Progress) -> Void
     ) async throws {
         let installed = try await ExtensionInstaller().install(listing, onProgress: onProgress)
+        forgetLeftoverSecrets(of: installed.manifest.name)
         storeVersions.record(listing.commitSHA, for: installed.manifest.name)
         updates[installed.manifest.name] = nil
+    }
+
+    /// A name not installed until now owns no secrets yet; any in the vault were a removed one's.
+    private func forgetLeftoverSecrets(of name: String) {
+        guard isEnabled, extensionNamed(name) == nil else { return }
+        storage.removeAll(extension: name)
     }
 
     /// A folder or GitHub install is the user's own copy, so the store has nothing to offer it.
@@ -860,6 +871,10 @@ final class ExtensionManager: ExtensionRuntimeDelegate, ExtensionHostContext {
         state = .rendered(tree)
         navigationDepth = tree.depth
         seedSearchBarAccessory(in: tree)
+        if let running {
+            ExtensionSecretsMigration.sealRememberedPasswords(
+                storage: storage, command: running, fields: tree.passwordFieldIDs)
+        }
     }
 
     func runtime(_ runtime: ExtensionRuntime, session: String, didFail message: String) {

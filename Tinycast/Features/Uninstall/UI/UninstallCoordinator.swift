@@ -44,8 +44,8 @@ final class UninstallCoordinator {
     /// The palette is already up, so this swaps the sub-screen rather than re-showing it.
     func beginUninstall(_ app: AppEntry) {
         guard app.kind == .application else { return }
-        // What stops a name or a shared bundle-ID namespace being misattributed.
-        let others = appIndex.apps.filter { $0.kind == .application && $0.id != app.id }
+        // Every copy, not just primaries: a second one with this bundle ID marks its data shared.
+        let others = appIndex.installedApplications.filter { $0.id != app.id }
         session.begin(
             app: app, otherAppNames: others.map(\.name),
             otherBundleIDs: others.compactMap(\.bundleID), isRunning: runningApps.isRunning(app))
