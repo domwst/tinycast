@@ -1,6 +1,7 @@
+import AppKit
 import SwiftUI
 
-/// Python: the search field is the `>>>` prompt, and the screen is the session's cells.
+/// Python: the session's cells above, and below them an input cell that holds a whole block.
 struct PythonScreen: PaletteScreen {
     let vm: PaletteState
     let coordinator: PythonCoordinator
@@ -11,6 +12,9 @@ struct PythonScreen: PaletteScreen {
 
     let rows = [Row()]
 
+    /// The input cell takes the keyboard: a block needs more than the header's one line.
+    let hidesSearchField = true
+
     var primaryActionTitle: String {
         coordinator.isBusy ? String(localized: "Running") : String(localized: "Run")
     }
@@ -18,26 +22,17 @@ struct PythonScreen: PaletteScreen {
     /// Return never interrupts: a line typed ahead must not cost the cell it was typed under.
     func isPrimaryActionEnabled(at selection: Int) -> Bool { !coordinator.isBusy }
 
+    /// ↑/↓ belong to the input, which moves its caret or walks the history itself.
+    func ownsVerticalKeys(at selection: Int) -> Bool { true }
+
     func activate(at selection: Int) {
-        if coordinator.submit(vm.query) { vm.query = "" }
+        coordinator.submit()
     }
 
     /// ⌘↵ runs what is there now, even where the REPL would ask for another line.
     func secondary(at selection: Int) -> Bool {
-        if coordinator.submit(vm.query, force: true) { vm.query = "" }
+        coordinator.submit(force: true)
         return true
-    }
-
-    /// ⇥ indents, as in any code editor; the palette's own ring has nothing to offer here.
-    func tab(at selection: Int, backwards: Bool) -> Bool {
-        coordinator.indent(backwards: backwards)
-        return true
-    }
-
-    func move(_ delta: Int, axis: PaletteAxis, from selection: Int) -> Int? {
-        guard axis == .vertical else { return nil }
-        coordinator.recallHistory(older: delta < 0)
-        return selection
     }
 
     func perform(_ shortcut: PaletteShortcut, at selection: Int) -> Bool {
@@ -67,7 +62,7 @@ struct PythonScreen: PaletteScreen {
                 title: String(localized: "Run Now"), systemImage: "play.fill",
                 shortcut: "⌘↵"
             ) {
-                if coordinator.submit(vm.query, force: true) { vm.query = "" }
+                coordinator.submit(force: true)
             })
         if coordinator.lastOutput != nil {
             items.append(
@@ -102,7 +97,11 @@ struct PythonScreen: PaletteScreen {
     }
 
     func body(selection: Int, scroll: ScrollIntent) -> AnyView {
-        AnyView(PythonNotebookView(coordinator: coordinator))
+        AnyView(
+            VStack(spacing: 0) {
+                PythonNotebookView(coordinator: coordinator)
+                PythonInputCell(coordinator: coordinator, palette: vm)
+            })
     }
 }
 
@@ -115,14 +114,14 @@ private struct PythonNotebookView: View {
 
     /// Anything that grows the page, so the view can follow it down while the reader is at the end.
     private var growth: Int {
-        notebook.cells.reduce(notebook.cells.count + coordinator.pendingLines.count) {
+        notebook.cells.reduce(notebook.cells.count) {
             $0 &+ $1.outputCharacters &+ ($1.result?.count ?? 0) &+ ($1.failure == nil ? 0 : 1)
                 &+ ($1.isRunning ? 0 : 7)
         }
     }
 
     var body: some View {
-        if notebook.cells.isEmpty, coordinator.pendingLines.isEmpty {
+        if notebook.cells.isEmpty {
             PythonEmptyState(coordinator: coordinator)
         } else {
             transcript
@@ -141,13 +140,9 @@ private struct PythonNotebookView: View {
                             PythonDividerView(text: divider.text)
                         }
                     }
-                    if !coordinator.pendingLines.isEmpty {
-                        PythonPendingBlockView(lines: coordinator.pendingLines)
-                    }
                     Color.clear.frame(height: metrics.spacing.xxs).id(Self.tail)
                 }
-                .padding(.top, metrics.spacing.lg)
-                .padding(.bottom, metrics.spacing.chatTranscriptBottom)
+                .padding(.vertical, metrics.spacing.lg)
                 .padding(.horizontal, metrics.spacing.xxl)
                 .frame(maxWidth: .infinity)
             }
@@ -228,7 +223,7 @@ private struct PythonEmptyState: View {
             if hasFailed {
                 Button(String(localized: "Python Settings"), action: coordinator.showSettings)
             } else {
-                Text("↵ runs a line  ·  ⌘↵ runs it now  ·  ⌘. interrupts  ·  ⌘R restarts")
+                Text("↵ runs  ·  ⇧↵ adds a line  ·  ⌘↵ runs now  ·  ⌘. interrupts  ·  ⌘R restarts")
                     .font(metrics.typography.rowTrailing)
                     .foregroundStyle(Theme.Colors.textSecondary)
             }
@@ -412,25 +407,74 @@ private struct PythonFailureView: View {
     }
 }
 
-/// The unfinished block above the prompt, dashed because none of it has run yet.
-private struct PythonPendingBlockView: View {
+/// The `>>>` cell: a whole block is typed here, and Return asks the driver whether it is done.
+private struct PythonInputCell: View {
     @Environment(\.metrics) private var metrics
-    let lines: [String]
+    @Bindable var coordinator: PythonCoordinator
+    let palette: PaletteState
+    @FocusState private var focused: Bool
+
+    /// Enough for a function; past it the cell scrolls rather than push the cells off screen.
+    private static let visibleLines = 12
 
     var body: some View {
-        VStack(alignment: .leading, spacing: metrics.spacing.sm) {
-            Text(verbatim: lines.joined(separator: "\n"))
+        HStack(alignment: .firstTextBaseline, spacing: metrics.spacing.md) {
+            Text(verbatim: ">>>")
                 .font(metrics.typography.code)
-                .foregroundStyle(Theme.Colors.textPrimary)
-            Text("An empty line runs the block; ⌘↵ runs it now, ⎋ discards it.")
-                .font(metrics.typography.rowTrailing)
                 .foregroundStyle(Theme.Colors.textTertiary)
+            TextField(
+                "", text: $coordinator.draft, selection: $coordinator.draftSelection,
+                prompt: Text("Type Python and press Return…"), axis: .vertical
+            )
+            .textFieldStyle(.plain)
+            .font(metrics.typography.code)
+            .lineLimit(1...Self.visibleLines)
+            .focused($focused)
+            .onKeyPress(keys: [.return], phases: .down, action: handleReturn)
+            .onKeyPress(keys: [.tab], phases: .down) { press in
+                guard !isComposing else { return .ignored }
+                coordinator.indent(backwards: press.modifiers.contains(.shift))
+                return .handled
+            }
+            .onKeyPress(keys: [.upArrow, .downArrow], phases: [.down, .repeat]) { press in
+                guard press.modifiers.isDisjoint(with: [.command, .option, .control, .shift]),
+                    !isComposing
+                else { return .ignored }
+                return coordinator.recallHistory(older: press.key == .upArrow) ? .handled : .ignored
+            }
         }
         .padding(metrics.spacing.lg)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: metrics.radius.card, style: .continuous)
+                .fill(Theme.Colors.cardFill))
         .overlay(
             RoundedRectangle(cornerRadius: metrics.radius.card, style: .continuous)
-                .strokeBorder(Theme.Colors.cardStroke, style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
+                .strokeBorder(focused ? Theme.Colors.textTertiary : Theme.Colors.cardStroke))
+        .padding(.horizontal, metrics.spacing.xxl)
+        .padding(.bottom, metrics.spacing.md)
+        // Every summon, not just the first: the palette re-opens on this screen as it was left.
+        .task(id: palette.focusToken) {
+            palette.noteEditingField(true)
+            await Task.yield()
+            focused = true
+        }
+        .onDisappear { palette.noteEditingField(false) }
+    }
+
+    /// ↵ submits and ⇧↵ breaks the line; ⌘↵ and ⌥↵ go on to the palette's own handlers.
+    private func handleReturn(_ press: KeyPress) -> KeyPress.Result {
+        guard !isComposing else { return .ignored }
+        switch press.modifiers.intersection([.command, .option, .control, .shift]) {
+        case []: coordinator.submit()
+        case .shift: coordinator.insertLineBreak()
+        default: return .ignored
+        }
+        return .handled
+    }
+
+    /// Return commits an input method's marked text before it may run anything.
+    private var isComposing: Bool {
+        (NSApp.keyWindow?.firstResponder as? NSTextView)?.hasMarkedText() == true
     }
 }
 

@@ -1,8 +1,8 @@
 # Python
 
-A Python prompt in the launcher. Typing `py` (or `python`) and ↵ opens a palette screen whose search
-field is the `>>>` prompt and whose body is the session's cells: each run is one native block holding
-its code, what it printed, the value of its last expression and any error. `py 2**64` and ↵ opens the
+A Python prompt in the launcher. Typing `py` (or `python`) and ↵ opens a palette screen with the
+session's cells above a `>>>` input cell: each run is one native block holding its code, what it
+printed, the value of its last expression and any error. `py 2**64` and ↵ opens the
 screen and runs that line. The session keeps its variables between openings of the launcher. The
 feature lives in `Features/Python/`, plus the driver at `Resources/PythonSession.py`.
 
@@ -34,7 +34,7 @@ feature lives in `Features/Python/`, plus the driver at `Resources/PythonSession
 | `Resources/PythonSession.py` | The driver: runs cells, judges unfinished input, reports events |
 | `Model/PythonProtocol.swift` | Requests and events as JSON lines, the line splitter and UTF-8 decoder |
 | `Model/PythonNotebook.swift` | Cells, dividers and input history folded from events, with their caps |
-| `Model/PythonInput.swift` | Continuation indents, trimming a block, and `py <code>` in the launcher |
+| `Model/PythonInput.swift` | The input's editing rules, trimming a block, and `py <code>` in the launcher |
 | `Service/PythonProcess.swift` | `posix_spawn` with the four pipes, the readers, interrupt and stop |
 | `Service/PythonInterpreterLocator.swift` | Which `python3`: the setting, the login shell's, or a known path |
 | `UI/PythonCoordinator.swift` | Owns the session, the prompt's unfinished block and the idle stop |
@@ -58,14 +58,19 @@ fd 3 closes, and a watcher thread exits it if Tinycast dies mid-cell.
 
 ## The prompt
 
-The search field is one line, so a block is built the way the classic REPL builds it. ↵ sends the
-pending lines plus the field's line. The driver answers `incomplete` when `codeop` says the code isn't
-finished, or when the last line is indented: a block ends on an empty line, as at a `...` prompt. Then
-the line joins the dashed pending block above the field, and the field starts indented, one level
-deeper after a `:`. ⌘↵ runs whatever is there without asking for more. A pasted block keeps its lines:
-`absorbLineBreaks` moves all but the last into the pending block instead of collapsing them, as other
-screens do. ↑/↓ walk whole cells of history. ⇥ and ⇧⇥ indent and outdent. With the field empty, ⎋
-discards the pending block and ⌫ steps back into its last line.
+The header's search field is one line and its height is fixed, so the screen hides it, as the
+snippet editor does, and draws its own input cell under the cells: a multi-line `TextField` that grows
+to twelve lines and holds a whole block. It claims the palette's editing flag while it is up, so a bare
+⌫ edits it instead of leaving the screen, and its own key handlers run before the palette's.
+
+↵ sends the whole input. The driver answers `incomplete` when `codeop` says the code isn't finished,
+or when the last line is indented: a block ends on an empty line, as at a `...` prompt. The input then
+gains a newline in place, indented as its last line, one level deeper after a `:`, and only a run the
+driver has started clears it, so a submission that never ran stays put. ⇧↵ always breaks the line at
+the caret the same way, ⌘↵ runs whatever is there without asking for more, ⇥ and ⇧⇥ indent and
+outdent, and a paste keeps its lines. ↑ on the first line and ↓ on the last walk whole cells of
+history; anywhere else they move the caret. ⎋ leaves the screen with the input kept for next time. The
+rules themselves are pure functions on `PythonInput`, which the harness checks.
 
 ## The session
 

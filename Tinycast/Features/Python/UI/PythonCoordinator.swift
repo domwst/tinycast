@@ -1,13 +1,15 @@
 import AppKit
 import Observation
+import SwiftUI
 
-/// Owns the one Python session: its interpreter, its cells, and the prompt's unfinished block.
+/// Owns the one Python session: its interpreter, its cells, and the input being typed.
 @MainActor
 @Observable
 final class PythonCoordinator {
     private(set) var notebook = PythonNotebook()
-    /// Lines of a block the driver said isn't finished, shown above the field's current line.
-    private(set) var pendingLines: [String] = []
+    /// The input cell's text; it clears only once the driver starts running it.
+    var draft = ""
+    var draftSelection: TextSelection?
     private(set) var interpreter: PythonInterpreter?
 
     @ObservationIgnored private var process: PythonProcess?
@@ -16,8 +18,8 @@ final class PythonCoordinator {
     @ObservationIgnored private var idleTimer: Task<Void, Never>?
     /// Sent before the interpreter was up; the pipe takes them once it is.
     @ObservationIgnored private var queued: [PythonRequest] = []
-    /// The field's line of a submission awaiting its answer, put back if it needs more.
-    @ObservationIgnored private var awaiting: (cell: Int, line: String)?
+    /// The submission awaiting its answer: a run clears the input, a need for more extends it.
+    @ObservationIgnored private var awaiting: Int?
     @ObservationIgnored private var historyCursor = PythonHistoryCursor()
 
     private let settings: AppSettings
@@ -50,7 +52,6 @@ final class PythonCoordinator {
         appIndex.setCommandsVisible([.python], settings.pythonEnabled)
         guard !settings.pythonEnabled else { return }
         shutDown(reason: String(localized: "Python was switched off."))
-        pendingLines = []
         if palette.mode == .python { palette.prepare(mode: .launcher) }
     }
 
@@ -63,27 +64,19 @@ final class PythonCoordinator {
             ensureSession()
             return
         }
-        guard !isBusy else { return paletteCoordinator.showPalette(mode: .python, seeding: code) }
-        // A command from the launcher is a fresh statement, not the tail of an abandoned block.
-        pendingLines = []
         paletteCoordinator.showPalette(mode: .python)
-        _ = submit(code)
+        replaceDraft(with: code)
+        submit()
     }
 
-    /// False when nothing was sent, so the field keeps what was typed.
-    func submit(_ line: String, force: Bool = false) -> Bool {
-        guard !isBusy else { return false }
-        let code = (pendingLines + [line]).joined(separator: "\n")
-        guard !code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            pendingLines = []
-            return false
-        }
+    /// ↵: runs the input, or extends it in place when the driver says it isn't finished.
+    func submit(force: Bool = false) {
+        guard !isBusy, !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         historyCursor.reset()
         // The driver needs a block's closing empty line; the cell and its history don't.
-        let cell = notebook.submit(PythonInput.trimmed(code))
-        awaiting = (cell, line)
-        send(PythonRequest(cell: cell, code: force ? PythonInput.trimmed(code) : code, force: force))
-        return true
+        let cell = notebook.submit(PythonInput.trimmed(draft))
+        awaiting = cell
+        send(PythonRequest(cell: cell, code: force ? PythonInput.trimmed(draft) : draft, force: force))
     }
 
     func interrupt() {
@@ -99,56 +92,58 @@ final class PythonCoordinator {
 
     func clear() {
         notebook.clear()
-        pendingLines = []
     }
 
-    /// ⎋ with an empty field drops the unfinished block, as Ctrl-C does at a `...` prompt.
-    func cancelPendingLines() -> Bool {
-        guard !pendingLines.isEmpty else { return false }
-        pendingLines = []
-        return true
+    // MARK: - Editing the input
+
+    /// ⇧↵: a new line at the caret, indented as the line before it, one level deeper after `:`.
+    func insertLineBreak() {
+        apply(PythonInput.lineBreak(in: draft, replacing: selectedOffsets))
     }
 
-    /// ⌫ on an empty field steps back into the block's last line, as deleting a newline would.
-    func reopenLastPendingLine() -> Bool {
-        guard let last = pendingLines.popLast() else { return false }
-        palette.query = last
-        return true
-    }
-
-    /// A pasted block's lines join the unfinished block, leaving its last line in the field.
-    func absorbLineBreaks() -> Bool {
-        guard palette.query.contains(where: \.isNewline) else { return false }
-        let normalized = palette.query.replacingOccurrences(of: "\r\n", with: "\n")
-            .replacingOccurrences(of: "\r", with: "\n")
-        var lines = normalized.components(separatedBy: "\n")
-        let last = lines.removeLast()
-        pendingLines += lines
-        palette.query = last
-        return true
-    }
-
+    /// ⇥ indents at the caret; ⇧⇥ takes one level off the caret's line.
     func indent(backwards: Bool) {
-        if backwards {
-            let removable = palette.query.prefix(PythonInput.indentUnit.count).prefix { $0 == " " }
-            palette.query.removeFirst(removable.count)
-        } else {
-            palette.query += PythonInput.indentUnit
-        }
+        let selected = selectedOffsets
+        apply(
+            backwards
+                ? PythonInput.outdent(in: draft, caret: selected.lowerBound)
+                : PythonInput.indent(in: draft, replacing: selected))
     }
 
-    /// ↑ and ↓ walk whole cells; a multi-line one lands as its block plus its last line.
-    func recallHistory(older: Bool) {
-        let current = (pendingLines + [palette.query]).joined(separator: "\n")
+    /// ↑ on the input's first line and ↓ on its last walk whole cells; elsewhere the caret moves.
+    func recallHistory(older: Bool) -> Bool {
+        let selected = selectedOffsets
+        let onEdge =
+            older
+            ? PythonInput.isOnFirstLine(draft, caret: selected.lowerBound)
+            : PythonInput.isOnLastLine(draft, caret: selected.upperBound)
+        guard onEdge else { return false }
         let recalled =
             older
-            ? historyCursor.older(in: notebook.history, current: current)
+            ? historyCursor.older(in: notebook.history, current: draft)
             : historyCursor.newer(in: notebook.history)
-        guard let recalled else { return }
-        var lines = recalled.components(separatedBy: "\n")
-        let last = lines.removeLast()
-        pendingLines = lines
-        palette.query = last
+        if let recalled { replaceDraft(with: recalled) }
+        return true
+    }
+
+    /// The selection in characters, or the end when the field has reported none.
+    private var selectedOffsets: Range<Int> {
+        guard case .selection(let range)? = draftSelection?.indices,
+            range.lowerBound >= draft.startIndex, range.upperBound <= draft.endIndex
+        else { return draft.count..<draft.count }
+        let lower = draft.distance(from: draft.startIndex, to: range.lowerBound)
+        return lower..<(lower + draft.distance(from: range.lowerBound, to: range.upperBound))
+    }
+
+    private func apply(_ edit: PythonInput.Edit) {
+        draft = edit.text
+        let index = draft.index(draft.startIndex, offsetBy: min(edit.caret, draft.count))
+        draftSelection = TextSelection(range: index..<index)
+    }
+
+    private func replaceDraft(with text: String) {
+        draft = text
+        draftSelection = TextSelection(range: draft.endIndex..<draft.endIndex)
     }
 
     var lastOutput: String? {
@@ -245,25 +240,21 @@ final class PythonCoordinator {
             listening = nil
             idleTimer?.cancel()
             // `exit()` already said why; only a crash still needs telling.
-            if case .ended = notebook.status { return restoreAwaitingLine() }
+            if case .ended = notebook.status { return dropAwaiting() }
             notebook.endSession(Self.describe(status))
-            restoreAwaitingLine()
+            dropAwaiting()
         }
     }
 
     /// The prompt follows the driver's answer: more lines for a block, a clear field for a run.
     private func settle(_ event: PythonEvent) {
         switch event {
-        case .incomplete(let cell) where cell == awaiting?.cell:
-            pendingLines.append(awaiting?.line ?? "")
+        case .incomplete(let cell) where cell == awaiting:
             awaiting = nil
-            let code = pendingLines.joined(separator: "\n")
-            if palette.mode == .python, palette.query.isEmpty {
-                palette.query = String(PythonInput.continuation(after: code).dropFirst())
-            }
-        case .started(let cell, _) where cell == awaiting?.cell:
+            replaceDraft(with: draft + PythonInput.continuation(after: draft))
+        case .started(let cell, _) where cell == awaiting:
             awaiting = nil
-            pendingLines = []
+            replaceDraft(with: "")
         case .finished:
             scheduleIdleStop()
         default:
@@ -275,14 +266,12 @@ final class PythonCoordinator {
         launching = nil
         queued.removeAll()
         notebook.endSession(reason)
-        restoreAwaitingLine()
+        dropAwaiting()
     }
 
-    /// A submission that never ran goes back to the field rather than vanishing with the session.
-    private func restoreAwaitingLine() {
-        guard let awaiting else { return }
-        self.awaiting = nil
-        if palette.mode == .python, palette.query.isEmpty { palette.query = awaiting.line }
+    /// A submission that never ran stays in the input, since only a started run clears it.
+    private func dropAwaiting() {
+        awaiting = nil
     }
 
     private func shutDown(reason: String) {
@@ -301,7 +290,7 @@ final class PythonCoordinator {
         listening = nil
         process.stop()
         notebook.endSession(reason)
-        restoreAwaitingLine()
+        dropAwaiting()
     }
 
     private func scheduleIdleStop() {

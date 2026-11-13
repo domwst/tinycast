@@ -433,9 +433,7 @@ struct RootPaletteView: View {
             .modifier(PaletteHideObserver { if menuOpen { closeMenus() } })
             .onChange(of: vm.query) {
                 resetCompactSelection()
-                // A pasted block keeps its lines in Python, as the prompt's unfinished block.
-                if vm.mode == .python, core.pythonCoordinator.absorbLineBreaks() { return }
-                if vm.mode != .python, vm.collapseQueryLineBreaks() { return }
+                if vm.collapseQueryLineBreaks() { return }
                 land(restoringSelection: true)
                 if vm.mode == .fileSearch { fileSearch.search(vm.query, filter: vm.fileSearchFilter) }
                 if vm.mode == .launcher { core.fileSearchCoordinator.searchFromLauncher(vm.query) }

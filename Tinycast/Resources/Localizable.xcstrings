@@ -22612,58 +22612,6 @@
         }
       }
     },
-    "An empty line runs the block; ⌘↵ runs it now, ⎋ discards it." : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Eine leere Zeile führt den Block aus; ⌘↵ führt ihn sofort aus, ⎋ verwirft ihn."
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Una línea vacía ejecuta el bloque; ⌘↵ lo ejecuta ya, ⎋ lo descarta."
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Une ligne vide exécute le bloc ; ⌘↵ l’exécute tout de suite, ⎋ l’abandonne."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "空行でブロックを実行します。⌘↵ ですぐに実行、⎋ で破棄します。"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "빈 줄을 입력하면 블록이 실행됩니다. ⌘↵는 바로 실행, ⎋는 취소합니다."
-          }
-        },
-        "pt" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Uma linha vazia executa o bloco; ⌘↵ executa agora, ⎋ descarta."
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Пустая строка запускает блок; ⌘↵ — запустить сразу, ⎋ — отменить."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "空行运行此代码块；⌘↵ 立即运行，⎋ 放弃。"
-          }
-        }
-      }
-    },
     "Angle" : {
       "localizations" : {
         "de" : {
@@ -147121,54 +147069,54 @@
         }
       }
     },
-    "↵ runs a line  ·  ⌘↵ runs it now  ·  ⌘. interrupts  ·  ⌘R restarts" : {
+    "↵ runs  ·  ⇧↵ adds a line  ·  ⌘↵ runs now  ·  ⌘. interrupts  ·  ⌘R restarts" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "↵ führt eine Zeile aus  ·  ⌘↵ sofort  ·  ⌘. unterbricht  ·  ⌘R startet neu"
+            "value" : "↵ ausführen  ·  ⇧↵ neue Zeile  ·  ⌘↵ sofort ausführen  ·  ⌘. unterbrechen  ·  ⌘R neu starten"
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "↵ ejecuta una línea  ·  ⌘↵ la ejecuta ya  ·  ⌘. interrumpe  ·  ⌘R reinicia"
+            "value" : "↵ ejecuta  ·  ⇧↵ añade una línea  ·  ⌘↵ ejecuta ya  ·  ⌘. interrumpe  ·  ⌘R reinicia"
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "↵ exécute une ligne  ·  ⌘↵ tout de suite  ·  ⌘. interrompt  ·  ⌘R redémarre"
+            "value" : "↵ exécute  ·  ⇧↵ ajoute une ligne  ·  ⌘↵ exécute tout de suite  ·  ⌘. interrompt  ·  ⌘R redémarre"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "↵ で行を実行  ·  ⌘↵ ですぐに実行  ·  ⌘. で中断  ·  ⌘R で再起動"
+            "value" : "↵ で実行  ·  ⇧↵ で行を追加  ·  ⌘↵ ですぐに実行  ·  ⌘. で中断  ·  ⌘R で再起動"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "↵ 줄 실행  ·  ⌘↵ 바로 실행  ·  ⌘. 중단  ·  ⌘R 재시작"
+            "value" : "↵ 실행  ·  ⇧↵ 줄 추가  ·  ⌘↵ 바로 실행  ·  ⌘. 중단  ·  ⌘R 재시작"
           }
         },
         "pt" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "↵ executa uma linha  ·  ⌘↵ executa agora  ·  ⌘. interrompe  ·  ⌘R reinicia"
+            "value" : "↵ executa  ·  ⇧↵ adiciona uma linha  ·  ⌘↵ executa agora  ·  ⌘. interrompe  ·  ⌘R reinicia"
           }
         },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "↵ — выполнить строку  ·  ⌘↵ — сразу  ·  ⌘. — прервать  ·  ⌘R — перезапуск"
+            "value" : "↵ — выполнить  ·  ⇧↵ — новая строка  ·  ⌘↵ — сразу  ·  ⌘. — прервать  ·  ⌘R — перезапуск"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "↵ 运行一行  ·  ⌘↵ 立即运行  ·  ⌘. 中断  ·  ⌘R 重新启动"
+            "value" : "↵ 运行  ·  ⇧↵ 添加一行  ·  ⌘↵ 立即运行  ·  ⌘. 中断  ·  ⌘R 重新启动"
           }
         }
       }
