@@ -329,10 +329,11 @@ struct ClipboardEncryptionMigrationTest {
         try? FileManager.default.createDirectory(at: images, withIntermediateDirectories: true)
         var db: OpaquePointer?
         sqlite3_open_v2(database.path, &db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nil)
+        // No UNIQUE: index pages interleave with the table's, and a rowid scan never reads them.
         sqlite3_exec(
             db,
             """
-            CREATE TABLE items(id TEXT NOT NULL UNIQUE, kind TEXT NOT NULL, text TEXT,
+            CREATE TABLE items(id TEXT NOT NULL, kind TEXT NOT NULL, text TEXT,
               image_path TEXT, created_at REAL NOT NULL, source_app TEXT, pinned_at REAL);
             BEGIN;
             """, nil, nil, nil)
