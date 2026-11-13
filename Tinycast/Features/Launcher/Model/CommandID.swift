@@ -9,6 +9,7 @@ enum CommandID: String, CaseIterable, Sendable {
     case translate = "command:translate"
     case summarize = "command:summarize"
     case calculatorHistory = "command:calculator-history"
+    case python = "command:python"
     case clipboardHistory = "command:clipboard-history"
     case pasteSequentially = "command:paste-sequentially"
     case searchEmoji = "command:search-emoji"
@@ -19,6 +20,7 @@ enum CommandID: String, CaseIterable, Sendable {
     case openCamera = "command:open-camera"
     case openInBrowser = "command:open-in-browser"
     case runShellCommand = "command:run-shell-command"
+    case runInPython = "command:run-in-python"
     case createCustomCommand = "command:create-custom-command"
     case searchCustomCommands = "command:search-custom-commands"
     case define = "command:define"
@@ -84,6 +86,7 @@ enum CommandID: String, CaseIterable, Sendable {
         case .translate: return BuiltInQuickAction.translate.titleResource
         case .summarize: return BuiltInQuickAction.summarize.titleResource
         case .calculatorHistory: return "Calculator History"
+        case .python: return "Python"
         case .clipboardHistory: return "Clipboard History"
         case .pasteSequentially: return "Paste Sequentially"
         case .searchEmoji: return "Search Emoji & Symbols"
@@ -94,6 +97,7 @@ enum CommandID: String, CaseIterable, Sendable {
         case .openCamera: return "Open Camera"
         case .openInBrowser: return "Open in Browser"
         case .runShellCommand: return "Run Shell Command"
+        case .runInPython: return "Run in Python"
         case .createCustomCommand: return "Create Custom Command"
         case .searchCustomCommands: return "Search Custom Commands"
         case .define: return "Define Word"
@@ -135,6 +139,7 @@ enum CommandID: String, CaseIterable, Sendable {
         case .translate: return BuiltInQuickAction.translate.symbol
         case .summarize: return BuiltInQuickAction.summarize.symbol
         case .calculatorHistory: return "plus.forwardslash.minus"
+        case .python, .runInPython: return "chevron.left.forwardslash.chevron.right"
         case .clipboardHistory: return "doc.on.clipboard"
         case .pasteSequentially: return "list.bullet.clipboard"
         case .searchEmoji: return "face.smiling"
@@ -200,6 +205,7 @@ enum CommandID: String, CaseIterable, Sendable {
     var boostedTerms: Set<String> {
         switch self {
         case .quickAI: ["ai"]
+        case .python: ["py", "python"]
         case .aiChat: ["chat"]
         default: []
         }
@@ -219,7 +225,7 @@ enum CommandID: String, CaseIterable, Sendable {
 
     /// Query-driven: the typed text is their input, so they are built where offered, never listed.
     var isQueryDriven: Bool {
-        self == .openInBrowser || self == .runShellCommand
+        self == .openInBrowser || self == .runShellCommand || self == .runInPython
     }
 
     /// A chord carries no query, and none should be able to terminate the app outright.

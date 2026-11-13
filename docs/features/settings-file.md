@@ -15,7 +15,8 @@ in `Features/Settings/` (`Model/`, `Service/`, `SettingsFileSchema.swift`), the 
   excluded from backups: a file or an import must never switch on something that reads a file.
 - **A capability grant never has a key.** Snippets, Extensions, Calendar access, Auto Join, Camera
   Preview, Quick Actions, MCP and clipboard text recognition are switched on only in the app, which
-  asks first. `settings-file-test` checks those paths stay absent.
+  asks first. The Python prompt is switched on in the app or by the Nix module, and neither it nor
+  its interpreter path has a key. `settings-file-test` checks those paths stay absent.
 - **A key that guards something only moves the safe way.** `clipboard.enabled` may turn capture off,
   never on, `general.automaticallyCheckForUpdates` may stop checks, never start them,
   `ai.webSearch` and `quicklinks.passesSelectedText` may turn off, never on,

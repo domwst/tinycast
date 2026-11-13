@@ -102,6 +102,12 @@ back off removes the copy it installed. It unlocks the keychain, asking for its 
 copy in place if anything fails. Create that keychain as [signing.md](signing.md#a-dedicated-keychain-for-nix-installs)
 shows.
 
+**The Python prompt.** `programs.tinycast.python = { enable = true; package = pkgs.python3; }`
+switches on the prompt `py` opens and points it at that interpreter's `bin/python3`, so its packages
+come from your config. It writes Tinycast's preferences at activation, which a running copy reads
+after a restart; leaving `enable` false leaves the choice made in Settings. See
+[python.md](features/python.md#settings-and-nix).
+
 **The trade-off.** Anything that can use the signing key can sign an impostor that macOS treats as
 Tinycast, with its permissions and its Keychain items, the clipboard key among them. Ad-hoc signing
 leaves no such key. A dedicated keychain that locks itself narrows that to the minutes after an update.

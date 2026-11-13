@@ -21,6 +21,7 @@ extension SettingsAnchor {
     static let generalAppearance = Self(tab: .general, title: "Appearance")
     static let generalCompactShortcuts = Self(tab: .general, title: "Compact Shortcuts")
     static let generalCalculator = Self(tab: .general, title: "Calculator")
+    static let generalPython = Self(tab: .general, title: "Python")
     static let generalGeneral = Self(tab: .general, title: "General")
     static let generalDeepLinks = Self(tab: .general, title: "Deeplinks")
 

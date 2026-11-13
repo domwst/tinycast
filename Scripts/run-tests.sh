@@ -154,6 +154,7 @@ run launcher-file-test     $L/LauncherFileFormat.swift \
                            Tinycast/Features/Settings/Model/SettingsFileJSON.swift
 run launcher-settings-file-test \
                            $L/LauncherFileFormat.swift $L/CommandID.swift $L/CommandCatalog.swift \
+                           Tinycast/Features/Python/Model/PythonInput.swift \
                            Tinycast/Features/Launcher/Service/LauncherSettingsFile.swift \
                            Tinycast/Features/Launcher/Service/AliasStore.swift \
                            Tinycast/Features/Launcher/Service/VisibilityStore.swift \
@@ -600,6 +601,9 @@ run custom-command-test    Tinycast/Platform/PseudoTerminal.swift \
                            Tinycast/Features/CustomCommands/Model/RaycastScriptImport.swift \
                            Tinycast/Features/CustomCommands/UI/CustomCommandEditorSession.swift \
                            Tinycast/Features/CustomCommands/Service/ShellCommandRunner.swift
+run python-session-test    Tinycast/Platform/ProcessExit.swift \
+                           Tinycast/Features/Python/Model/*.swift \
+                           Tinycast/Features/Python/Service/*.swift
 run custom-command-list-test Tinycast/Features/CustomCommands/Model/CustomCommand.swift \
                              Tinycast/Features/CustomCommands/UI/CustomCommandListScreen.swift
 run uninstall-coordinator-test Tinycast/Features/Uninstall/Model/*.swift \

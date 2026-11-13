@@ -390,6 +390,9 @@ final class PaletteWindowController: NSObject, NSWindowDelegate {
             if core.palette.mode == .ai, core.quickAICoordinator.removeLastAttachment() {
                 return true
             }
+            if core.palette.mode == .python, core.pythonCoordinator.reopenLastPendingLine() {
+                return true
+            }
             if core.palette.pop() { return true }
             guard core.palette.mode != .launcher else { return false }
             core.palette.prepare(mode: .launcher)
@@ -413,6 +416,9 @@ final class PaletteWindowController: NSObject, NSWindowDelegate {
             if core.palette.mode == .snippetEditor, !core.palette.isComposing {
                 core.snippetCoordinator.cancelSnippetEditing()
                 return true
+            }
+            if core.palette.mode == .python, !core.palette.isComposing, core.palette.query.isEmpty {
+                return core.pythonCoordinator.cancelPendingLines()
             }
             return false
         }

@@ -202,6 +202,9 @@ final class AppCore {
         paletteCoordinator: paletteCoordinator)
     @ObservationIgnored private(set) lazy var calculatorCoordinator = CalculatorCoordinator(
         calcHistory: calcHistory, paletteCoordinator: paletteCoordinator, core: self)
+    @ObservationIgnored private(set) lazy var pythonCoordinator = PythonCoordinator(
+        settings: settings, palette: palette, paletteCoordinator: paletteCoordinator,
+        appIndex: appIndex, core: self)
     @ObservationIgnored private(set) lazy var calendarCoordinator = CalendarCoordinator(
         store: calendarStore, clock: meetingClock, appIndex: appIndex, settings: settings,
         paletteCoordinator: paletteCoordinator, core: self)
@@ -307,6 +310,7 @@ final class AppCore {
             menuSearchCoordinator.applyEnabled()
             fileSearchCoordinator.applyPolicy()
             notesCoordinator.applyEnabled()
+            pythonCoordinator.applyEnabled()
             installedAI.launchSettings = { [aiSettings] in aiSettings.launch(for: $0) }
             chatGPTSubscription.launchSettings = { [aiSettings] in aiSettings.launch(for: .codex) }
             aiChatCoordinator.applyEnabled()
@@ -629,6 +633,7 @@ final class AppCore {
         snippetListener.stop()
         snippetsStore.stop()
         aiChats.reset()
+        pythonCoordinator.prepareForTermination()
         // Closing the last handle folds the WAL back in, so no older frame of a chat stays behind.
         chatHistory.close()
         chatGPTSubscription.stop()
@@ -744,6 +749,7 @@ final class AppCore {
                 $0.menuSearchCoordinator.applyEnabled()
             })
         track({ _ = $0.notesEnabled }, reproject: { $0.notesCoordinator.applyEnabled() })
+        track({ _ = $0.pythonEnabled }, reproject: { $0.pythonCoordinator.applyEnabled() })
         track(
             { _ = $0.notesShowsInMenuBar }, reproject: { $0.notesCoordinator.applyMenuBarItem() })
         track({ _ = $0.aiEnabled }, reproject: { $0.aiChatCoordinator.applyEnabled() })

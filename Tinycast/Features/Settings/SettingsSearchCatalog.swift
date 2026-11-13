@@ -173,6 +173,8 @@ enum SettingsSearchCatalog {
         .init(
             .generalCalculator, "Number format",
             keywords: ["decimal", "comma", "separator", "locale", "region", "thousands"]),
+        .init(.generalPython, "Python", keywords: ["repl", "shell", "interpreter", "py", "code"]),
+        .init(.generalPython, "Interpreter", keywords: ["python3", "path", "nix", "venv"]),
         .init(
             .generalSearch, "Show suggestions",
             keywords: ["frequent", "recent", "recommended", "empty", "root search"]),

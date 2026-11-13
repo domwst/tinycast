@@ -81,6 +81,10 @@ final class LauncherCoordinator {
                 AppLauncher.open(app.url)
                 return
             }
+            if id == .runInPython {
+                core.pythonCoordinator.open(running: searchQuery.flatMap(PythonInput.launcherCode(in:)))
+                return
+            }
             runCommand(id)
             return
         }
@@ -180,6 +184,8 @@ final class LauncherCoordinator {
             core.quickActionCoordinator.run(.summarize)
         case .calculatorHistory:
             paletteCoordinator.togglePalette(mode: .calculatorHistory)
+        case .python:
+            core.pythonCoordinator.open()
         case .clipboardHistory:
             paletteCoordinator.togglePalette(mode: .clipboard)
         case .pasteSequentially:
@@ -199,7 +205,7 @@ final class LauncherCoordinator {
             Task { await core.cameraCoordinator.show() }
         case .define:
             core.dictionaryCoordinator.show()
-        case .openInBrowser, .runShellCommand:
+        case .openInBrowser, .runShellCommand, .runInPython:
             break  // Query-driven: each runs where the typed text is, never through this funnel.
         case .joinNextMeeting:
             calendarCoordinator.joinNextMeeting()

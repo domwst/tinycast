@@ -85,9 +85,9 @@ enum DeepLinkConsentPolicy {
         switch id {
         case .fixGrammar, .rewrite, .translate, .summarize, .pasteSequentially, .openCamera,
             .joinNextMeeting, .copyMeetingLink, .openInCalendar, .captureWindowLayout, .openInBrowser,
-            .runShellCommand, .quit, .checkForUpdates:
+            .runShellCommand, .runInPython, .quit, .checkForUpdates:
             true
-        case .quickAI, .aiChat, .calculatorHistory, .clipboardHistory, .searchEmoji, .searchFiles,
+        case .quickAI, .aiChat, .calculatorHistory, .python, .clipboardHistory, .searchEmoji, .searchFiles,
             .searchMenuItems, .switchWindows, .switchWindowsBackwards, .createCustomCommand,
             .searchCustomCommands, .define, .mySchedule, .createEvent, .showNotes, .createNote,
             .searchNotes, .createWindowLayout, .switchRoom, .createRoom, .createQuicklink,

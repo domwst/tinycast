@@ -120,6 +120,20 @@ struct GeneralSettingsView: View {
             }
 
             Section {
+                Toggle(isOn: $settings.pythonEnabled) {
+                    SettingsRowTitle(.generalPython, "Python")
+                    Text("Type py in the launcher for a Python prompt that keeps its variables.")
+                }
+                TextField(text: $settings.pythonInterpreterPath, prompt: Text("Automatic")) {
+                    SettingsRowTitle(.generalPython, "Interpreter")
+                    Text("Empty uses the python3 your login shell finds. A change applies after a restart.")
+                }
+                .settingsEnabled(settings.pythonEnabled)
+            } header: {
+                SettingsSectionHeader(.generalPython)
+            }
+
+            Section {
                 Toggle(isOn: $settings.launcherShowsSuggestions) {
                     SettingsRowTitle(.generalSearch, "Show suggestions")
                     Text("Shows your most-used items when the search field is empty.")

@@ -54,7 +54,8 @@ struct SettingsFileTest {
         let grantPaths = [
             "snippets.enabled", "extensions.enabled", "calendar.enabled",
             "calendar.autoJoinMeetings", "calendar.cameraPreview", "quickActions.enabled",
-            "ai.mcpEnabled", "mcp.enabled", "clipboard.textSearchEnabled", "dictation.enabled"
+            "ai.mcpEnabled", "mcp.enabled", "clipboard.textSearchEnabled", "dictation.enabled",
+            "python.enabled", "python.interpreterPath"
         ]
         check(
             "no capability grant has a settings.json key",

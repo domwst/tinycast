@@ -434,6 +434,16 @@ final class AppSettings {
         didSet { defaults.set(snippetsEnabled, forKey: Key.snippetsEnabled.rawValue) }
     }
 
+    /// Off until switched on in Settings or by the Nix module; it runs whatever is typed.
+    var pythonEnabled: Bool {
+        didSet { defaults.set(pythonEnabled, forKey: Key.pythonEnabled.rawValue) }
+    }
+
+    /// Empty means the `python3` the login shell finds.
+    var pythonInterpreterPath: String {
+        didSet { defaults.set(pythonInterpreterPath, forKey: Key.pythonInterpreterPath.rawValue) }
+    }
+
     /// Off out of the box: on means Tinycast may read a selection anywhere and type over it.
     var quickActionsEnabled: Bool {
         didSet { defaults.set(quickActionsEnabled, forKey: Key.quickActionsEnabled.rawValue) }
@@ -827,6 +837,8 @@ final class AppSettings {
             defaults.object(forKey: Key.customCommandsShowInLauncher.rawValue) == nil
             || defaults.bool(forKey: Key.customCommandsShowInLauncher.rawValue)
         snippetsEnabled = defaults.bool(forKey: Key.snippetsEnabled.rawValue)
+        pythonEnabled = defaults.bool(forKey: Key.pythonEnabled.rawValue)
+        pythonInterpreterPath = defaults.string(forKey: Key.pythonInterpreterPath.rawValue) ?? ""
         quickActionsEnabled = defaults.bool(forKey: Key.quickActionsEnabled.rawValue)
         snippetsShowInLauncher =
             defaults.object(forKey: Key.snippetsShowInLauncher.rawValue) == nil

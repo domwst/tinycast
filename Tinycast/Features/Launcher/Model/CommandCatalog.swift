@@ -32,6 +32,12 @@ enum CommandCatalog {
         return makeEntry(.openInBrowser, url: url, subtitle: String(localized: "URL"))
     }
 
+    /// `py 2**64` earns a row that opens Python on it; the code runs only once it is chosen.
+    static func runInPython(for query: String) -> AppEntry? {
+        guard PythonInput.launcherCode(in: query) != nil else { return nil }
+        return makeEntry(.runInPython, subtitle: String(localized: "Python"))
+    }
+
     /// A command's row, built rather than looked up — `all` holds none of the query-driven ones.
     nonisolated static func makeEntry(
         _ id: CommandID, url: URL? = nil, subtitle: String? = nil

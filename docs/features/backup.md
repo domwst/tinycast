@@ -152,7 +152,8 @@ dialogs carry no secure field.
 `settings-backup-test` asserts that every `AppSettingsKey` appears in exactly one table, that no field
 claims a key twice, that every exclusion names a real key and carries a non-empty reason, and that each
 capability-granting key — `snippetsEnabled`, `extensionsEnabled`, `calendarEnabled`,
-`autoJoinMeetings`, `cameraPreview`, `quickActionsEnabled` — is named individually as excluded. The
+`autoJoinMeetings`, `cameraPreview`, `quickActionsEnabled`, `pythonEnabled`, `pythonInterpreterPath`
+— is named individually as excluded. The
 duplication between `AppSettings` and this file is the point: it forces a decision about every new
 setting rather than defaulting it into a backup.
 
